@@ -86,3 +86,38 @@ def test_extra_annotations_are_discarded(monkeypatch):
 def test_empty_findings_short_circuits(monkeypatch):
     monkeypatch.setattr(settings, "openai_api_key", "sk-test")
     assert reasoning.annotate([]) == []
+
+
+class FakeOpenAIMultiBatch:
+    """Returns different content per call so batch order/count are observable."""
+
+    def __init__(self, payloads):
+        self._payloads = payloads
+        self.call_count = 0
+        outer = self
+
+        class Completions:
+            def create(self, **kwargs):
+                payload = outer._payloads[outer.call_count]
+                outer.call_count += 1
+                message = type("M", (), {"content": json.dumps(payload)})()
+                choice = type("C", (), {"message": message})()
+                return type("R", (), {"choices": [choice]})()
+
+        self.chat = type("Chat", (), {"completions": Completions()})()
+
+
+def test_multi_batch_alignment(monkeypatch):
+    """30 findings -> two batches (25 + 5). Global indexes must land correctly."""
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test")
+    fake = FakeOpenAIMultiBatch([
+        {"annotations": [{"index": 0, "explanation": "FIRST_BATCH_ZERO", "fix": "f0"}]},
+        {"annotations": [{"index": 27, "explanation": "SECOND_BATCH_27", "fix": "f27"}]},
+    ])
+    monkeypatch.setattr(reasoning, "_client", lambda: fake)
+
+    result = reasoning.annotate(make(30))
+    assert len(result) == 30
+    assert result[0]["explanation"] == "FIRST_BATCH_ZERO"
+    assert result[27]["explanation"] == "SECOND_BATCH_27"
+    assert fake.call_count == 2
