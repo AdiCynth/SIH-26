@@ -1,10 +1,9 @@
 import json
-import shutil
 
 import pytest
 
 from app.scanners import semgrep_scan
-from app.scanners.base import ScannerUnavailable
+from app.scanners.base import ScannerUnavailable, _resolve_executable
 
 SAMPLE_OUTPUT = json.dumps({
     "results": [
@@ -64,7 +63,7 @@ def test_diff_mode_passes_only_changed_files(tmp_path, monkeypatch):
     assert captured["cmd"][-1] == "app.py"
 
 
-@pytest.mark.skipif(shutil.which("semgrep") is None, reason="semgrep not installed")
+@pytest.mark.skipif(_resolve_executable("semgrep") == "semgrep", reason="semgrep not installed")
 def test_real_semgrep_finds_injection(fixture_repo):
     findings = semgrep_scan.scan(fixture_repo)
     assert any("eval" in f.message.lower() or "eval" in f.file for f in findings)

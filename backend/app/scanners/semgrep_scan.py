@@ -9,7 +9,7 @@ TOOL = "semgrep"
 def scan(workspace: Path, files: list[str] | None = None) -> list[RawFinding]:
     targets = files if files else ["."]
     cmd = ["semgrep", "scan", "--config", "auto", "--json", "--quiet",
-           "--no-git-ignore", "--metrics", "off", *targets]
+           "--no-git-ignore", *targets]
     result = run_tool(cmd, cwd=workspace)
     try:
         payload = json.loads(result.stdout)

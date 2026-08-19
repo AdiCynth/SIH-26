@@ -1,4 +1,6 @@
+import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,10 +34,20 @@ def normalize_severity(raw: str) -> str:
     return _SEVERITY_MAP.get((raw or "").strip().lower(), "medium")
 
 
+def _resolve_executable(name: str) -> str:
+    """Find a tool on PATH, or alongside the interpreter running us (venv bin)."""
+    found = shutil.which(name)
+    if found:
+        return found
+    local = Path(sys.executable).parent / name
+    return str(local) if local.exists() else name
+
+
 def run_tool(cmd: list[str], cwd: Path, timeout: int = 600) -> subprocess.CompletedProcess:
+    resolved = [_resolve_executable(cmd[0]), *cmd[1:]]
     try:
         return subprocess.run(
-            cmd, cwd=str(cwd), capture_output=True, text=True, timeout=timeout
+            resolved, cwd=str(cwd), capture_output=True, text=True, timeout=timeout
         )
     except FileNotFoundError as exc:
         raise ScannerUnavailable(f"{cmd[0]} is not installed") from exc
