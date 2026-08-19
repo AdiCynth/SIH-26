@@ -23,11 +23,26 @@ _KEYWORDS = {
     "private", "static", "void", "int", "float", "str", "bool", "throw", "catch",
 }
 _IDENT = re.compile(r"[A-Za-z_]\w*")
+_STRING = re.compile(r'"[^"]*"|\'[^\']*\'')
+
+
+def _mask_strings(line: str) -> str:
+    """Replace quoted spans with a placeholder derived from their own content,
+    so literal text doesn't drive the fingerprint but distinct literals don't
+    collide either. The placeholder is digit-only (no leading letter) so the
+    later identifier substitution leaves it alone."""
+    def repl(match: re.Match[str]) -> str:
+        content = match.group(0)[1:-1]
+        digest = str(int(hashlib.sha1(content.encode()).hexdigest(), 16))[:12]
+        return f'"#{digest}#"'
+    return _STRING.sub(repl, line)
 
 
 def _normalize_line(line: str) -> str:
-    """Normalize a line by replacing non-keyword identifiers with 'V'."""
-    return _IDENT.sub(lambda m: m.group(0) if m.group(0) in _KEYWORDS else "V", line.strip())
+    """Normalize a line by masking string literal content, then replacing
+    non-keyword identifiers with 'V'."""
+    masked = _mask_strings(line.strip())
+    return _IDENT.sub(lambda m: m.group(0) if m.group(0) in _KEYWORDS else "V", masked)
 
 
 def _candidate_files(workspace: Path, files: list[str] | None) -> list[Path]:

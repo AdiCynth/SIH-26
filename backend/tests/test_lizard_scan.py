@@ -46,20 +46,59 @@ def test_diff_mode_scans_only_changed_files(tmp_path):
 
 
 def test_does_not_false_positive_on_different_logic(tmp_path):
-    """Verify normalization does not over-match genuinely different functions."""
+    """Verify normalization does not over-match genuinely different functions.
+
+    Both bodies have >= 6 non-empty lines (clearing the MIN_DUPLICATE_LINES
+    floor, so both are actually fingerprinted) and differ in *structure*
+    (a conditional + multiply vs. two appends + a reverse), not merely in
+    names, so a sane normalizer keeps them apart.
+    """
     (tmp_path / "different.py").write_text(
         "def sum_data(items):\n"
         "    total = 0\n"
         "    for item in items:\n"
-        "        total += item['value']\n"
+        "        if item['active']:\n"
+        "            total += item['value']\n"
+        "    total *= 2\n"
         "    return total\n"
         "\n"
         "def format_items(entries):\n"
         "    result = []\n"
         "    for entry in entries:\n"
         "        result.append(str(entry))\n"
+        "        result.append('|')\n"
+        "    result.reverse()\n"
         "    return result\n"
     )
     findings = lizard_scan.scan(tmp_path)
     duplicates = [f for f in findings if "duplicate" in f.message.lower()]
     assert not duplicates, "different logic should not be flagged as duplicates"
+
+
+def test_does_not_collapse_different_string_literals(tmp_path):
+    """Two structurally identical functions differing ONLY in string literal
+    content must not be flagged as duplicates. Both bodies have 6 non-empty
+    lines, clearing the MIN_DUPLICATE_LINES floor."""
+    (tmp_path / "strings.py").write_text(
+        "def handle_missing(record):\n"
+        "    if record is None:\n"
+        "        return {\"error\": \"no data found\"}\n"
+        "    total = 0\n"
+        "    for key in record:\n"
+        "        total += 1\n"
+        "    return total\n"
+        "\n"
+        "def handle_invalid(record):\n"
+        "    if record is None:\n"
+        "        return {\"error\": \"bad request sent\"}\n"
+        "    total = 0\n"
+        "    for key in record:\n"
+        "        total += 1\n"
+        "    return total\n"
+    )
+    findings = lizard_scan.scan(tmp_path)
+    duplicates = [f for f in findings if "duplicate" in f.message.lower()]
+    assert not duplicates, (
+        "functions differing only in string literal content should not be "
+        "flagged as duplicates"
+    )
