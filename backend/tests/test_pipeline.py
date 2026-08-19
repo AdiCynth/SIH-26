@@ -150,6 +150,50 @@ def test_zip_source_temp_file_deleted_after_successful_scan(db, tmp_path, monkey
     assert not zip_path.exists()
 
 
+def test_scan_error_is_truncated_to_fit_the_column(db, scan_row, monkeypatch):
+    """scan.error must fit String(500) even when SQLite (unlike Postgres) won't enforce it.
+
+    Uses a PARTIAL failure (one scanner survives) so this exercises the success-path
+    `scan.error = "; ".join(failures)` assignment, not `_fail`'s already-truncated one.
+    """
+    long_message = "x" * 300
+    monkeypatch.setattr(pipeline, "SCANNERS", [
+        fake_scanner([RawFinding("semgrep", "high", "app.py", 1, "eval used")]),
+        fake_scanner(error=ScannerUnavailable(long_message)),
+        fake_scanner(error=ScannerUnavailable(long_message)),
+    ])
+    monkeypatch.setattr(pipeline, "annotate", lambda f: None)
+
+    pipeline.run_scan(scan_row.id)
+
+    db.expire_all()
+    scan = db.get(Scan, scan_row.id)
+    assert scan.status == "done"
+    assert scan.error is not None
+    assert len(scan.error) <= 500
+
+
+def test_crash_after_intake_still_ends_in_failed_not_stuck_running(db, scan_row, monkeypatch):
+    """An exception from anywhere past intake (e.g. annotate) must not escape run_scan
+    and must not leave the scan stranded at status='running'."""
+    monkeypatch.setattr(pipeline, "SCANNERS", [
+        fake_scanner([RawFinding("semgrep", "high", "app.py", 1, "eval used")]),
+    ])
+
+    def boom(findings):
+        raise RuntimeError("annotate blew up")
+
+    monkeypatch.setattr(pipeline, "annotate", boom)
+
+    pipeline.run_scan(scan_row.id)  # must not raise
+
+    db.expire_all()
+    scan = db.get(Scan, scan_row.id)
+    assert scan.status == "failed"
+    assert scan.error
+    assert "annotate blew up" in scan.error
+
+
 def test_zip_source_temp_file_deleted_after_failed_scan(db, tmp_path, monkeypatch):
     user = User(email="z2@b.com", password_hash="x")
     db.add(user)
