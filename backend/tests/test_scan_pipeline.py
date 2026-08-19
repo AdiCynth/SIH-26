@@ -45,6 +45,12 @@ def test_pipeline_reports_secrets_vulns_and_vibe_debt(db, scan_of_fixture, monke
     assert "vibe-debt" in categories
     assert any("duplicate" in f.message.lower() for f in scan.findings)
 
+    assert "semgrep" in tools, "semgrep produced nothing"
+    assert any(
+        f.tool == "semgrep" and f.file == "app.py" and "eval" in f.message.lower()
+        for f in scan.findings
+    ), "semgrep missed the eval() injection in app.py"
+
     if _resolve_executable("gitleaks") != "gitleaks":
         assert any(f.tool == "gitleaks" for f in scan.findings), "planted secret missed"
     if shutil.which("dependency-check.sh"):

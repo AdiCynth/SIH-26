@@ -74,13 +74,16 @@ uvicorn app.main:app --reload --port 8000
 python -m pytest -v
 ```
 
-Scanner tests that need a missing binary skip themselves rather than fail.
-`tests/test_scan_pipeline.py` is the one end-to-end test that runs the real
-scanners against a fixture repo with a planted secret, a vulnerable
-dependency, and duplicated code — it's slower than the rest of the suite
-(semgrep alone takes several seconds and reaches the network for its
-ruleset) and is the strongest signal that the whole pipeline actually works,
-not just its pieces in isolation.
+Most per-scanner tests that need a missing binary skip themselves rather
+than fail. `tests/test_scan_pipeline.py` is different: it never skips — it
+always runs the real pipeline and narrows which assertions it makes
+depending on which binaries are present, so it stays the one test that
+fails outright if the pipeline itself breaks, even with tools missing. It
+runs against a fixture repo with a planted secret, a vulnerable dependency,
+and duplicated code, and it's slower than the rest of the suite (semgrep
+alone takes several seconds and reaches the network for its ruleset) — it's
+the strongest signal that the whole pipeline actually works, not just its
+pieces in isolation.
 
 ## Using the status endpoint as a CI gate
 
