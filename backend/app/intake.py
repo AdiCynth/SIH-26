@@ -46,10 +46,11 @@ def _extract(zip_path: str, dest: Path) -> None:
     except (zipfile.BadZipFile, FileNotFoundError) as exc:
         raise IntakeError("Uploaded file is not a readable zip archive") from exc
     with archive:
+        dest_root = dest.resolve()
         for member in archive.namelist():
             target = (dest / member).resolve()
             # Zip-slip guard: a member must not escape the workspace.
-            if not str(target).startswith(str(dest.resolve())):
+            if not target.is_relative_to(dest_root):
                 raise IntakeError(f"Archive entry escapes the workspace: {member!r}")
         archive.extractall(dest)
 

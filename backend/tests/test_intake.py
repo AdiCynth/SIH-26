@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from app.intake import (IntakeError, prepare, repo_key_from_bytes,
+from app.intake import (IntakeError, _extract, prepare, repo_key_from_bytes,
                         repo_key_from_url)
 
 
@@ -46,6 +46,21 @@ def test_zip_slip_is_rejected(tmp_path):
         with prepare("zip", str(zip_path)):
             pass
     assert not (tmp_path.parent / "escaped.py").exists()
+
+
+def test_zip_slip_prefix_collision_is_rejected(tmp_path):
+    # A member of the form "../<dest-basename><suffix>/..." resolves to a
+    # sibling directory whose path string has dest's path string as a
+    # prefix. A naive str.startswith() containment check would wrongly
+    # accept this; Path.is_relative_to() must reject it.
+    dest = tmp_path / "ws"
+    dest.mkdir()
+    zip_path = tmp_path / "evil.zip"
+    zip_path.write_bytes(_zip_bytes({"../ws_sibling/evil.py": "pwned"}))
+
+    with pytest.raises(IntakeError):
+        _extract(str(zip_path), dest)
+    assert not (tmp_path / "ws_sibling").exists()
 
 
 def test_unknown_source_type_rejected():
