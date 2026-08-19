@@ -1,11 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from app.auth import (COOKIE_NAME, create_token, current_user, hash_password,
                       set_auth_cookie, verify_password)
+from app.config import settings
 from app.db import get_db
 from app.models import User
+from fastapi.responses import RedirectResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -50,3 +53,62 @@ def logout(response: Response):
 @router.get("/me", response_model=UserOut)
 def me(user: User = Depends(current_user)):
     return UserOut(id=user.id, email=user.email)
+
+
+GITHUB_AUTHORIZE = "https://github.com/login/oauth/authorize"
+GITHUB_TOKEN = "https://github.com/login/oauth/access_token"
+GITHUB_API = "https://api.github.com"
+
+
+def exchange_code(code: str) -> dict:
+    """Trade an OAuth code for the GitHub account's id and email."""
+    with httpx.Client(timeout=15) as http:
+        token_resp = http.post(
+            GITHUB_TOKEN,
+            headers={"Accept": "application/json"},
+            data={
+                "client_id": settings.github_client_id,
+                "client_secret": settings.github_client_secret,
+                "code": code,
+            },
+        )
+        token_resp.raise_for_status()
+        access_token = token_resp.json().get("access_token")
+        if not access_token:
+            raise HTTPException(status_code=401, detail="GitHub rejected the code")
+
+        headers = {"Authorization": f"Bearer {access_token}",
+                   "Accept": "application/vnd.github+json"}
+        profile = http.get(f"{GITHUB_API}/user", headers=headers).json()
+        email = profile.get("email")
+        if not email:
+            emails = http.get(f"{GITHUB_API}/user/emails", headers=headers).json()
+            primary = next((e for e in emails if e.get("primary")), None)
+            email = primary["email"] if primary else f"{profile['id']}@users.noreply.github.com"
+        return {"github_id": str(profile["id"]), "email": email}
+
+
+@router.get("/github/login")
+def github_login(request: Request):
+    redirect_uri = str(request.url_for("github_callback"))
+    return RedirectResponse(
+        f"{GITHUB_AUTHORIZE}?client_id={settings.github_client_id}"
+        f"&redirect_uri={redirect_uri}&scope=read:user%20user:email"
+    )
+
+
+@router.get("/github/callback", name="github_callback")
+def github_callback(code: str, db: Session = Depends(get_db)):
+    account = exchange_code(code)
+    user = db.query(User).filter(User.github_id == account["github_id"]).first()
+    if user is None:
+        # An existing email/password account with the same address gets linked.
+        user = db.query(User).filter(User.email == account["email"]).first()
+        if user is None:
+            user = User(email=account["email"])
+            db.add(user)
+        user.github_id = account["github_id"]
+        db.commit()
+    response = RedirectResponse(settings.frontend_url)
+    set_auth_cookie(response, create_token(user.id))
+    return response
