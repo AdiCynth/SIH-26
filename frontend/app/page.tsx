@@ -16,14 +16,26 @@ export default function Dashboard() {
   const [headRef, setHeadRef] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    setScans(await listScans());
+    try {
+      setScans(await listScans());
+      setRefreshError(null);
+    } catch (err) {
+      setRefreshError(
+        err instanceof Error ? err.message : "Could not refresh scans"
+      );
+    }
   }, []);
 
   useEffect(() => {
     me()
-      .then((user) => setEmail(user.email))
+      .then((user) => {
+        setEmail(user.email);
+        setAuthChecked(true);
+      })
       .then(refresh)
       .catch(() => router.push("/login"));
   }, [refresh, router]);
@@ -55,6 +67,8 @@ export default function Dashboard() {
       setBusy(false);
     }
   }
+
+  if (!authChecked) return null;
 
   return (
     <main className="mx-auto max-w-3xl p-6">
@@ -111,6 +125,11 @@ export default function Dashboard() {
       </form>
 
       <h2 className="mb-3 font-medium">Past scans</h2>
+      {refreshError && (
+        <p className="mb-3 text-sm text-red-600">
+          Lost contact with the server: {refreshError}. Retrying…
+        </p>
+      )}
       {scans.length === 0 ? (
         <p className="text-sm text-gray-500">Nothing scanned yet.</p>
       ) : (
