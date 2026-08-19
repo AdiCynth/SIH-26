@@ -11,9 +11,11 @@ from app.models import Finding, Scan
 
 @pytest.fixture()
 def client(db, monkeypatch):
-    monkeypatch.setattr(routes_scans, "run_scan", lambda scan_id: None)
+    started: list[int] = []
+    monkeypatch.setattr(routes_scans, "run_scan", lambda scan_id: started.append(scan_id))
     c = TestClient(app)
     c.post("/auth/signup", json={"email": "s@b.com", "password": "hunter2"})
+    c.started = started
     return c
 
 
@@ -58,6 +60,16 @@ def test_create_scan_without_source_is_400(client):
 
 def test_create_scan_with_bad_url_is_400(client):
     assert client.post("/scans", data={"repo_url": "not-a-repo"}).status_code == 400
+
+
+def test_create_scan_schedules_the_pipeline(client):
+    scan_id = client.post("/scans", data={"repo_url": "https://github.com/Acme/Demo"}).json()["id"]
+    assert client.started == [scan_id]
+
+
+def test_rejected_scan_does_not_schedule_the_pipeline(client):
+    assert client.post("/scans", data={"repo_url": "not-a-repo"}).status_code == 400
+    assert client.started == []
 
 
 def test_create_scan_requires_auth(db):
