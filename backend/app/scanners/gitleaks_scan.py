@@ -13,11 +13,8 @@ def scan(workspace: Path, files: list[str] | None = None) -> list[RawFinding]:
         cmd = ["gitleaks", "detect", "--no-git", "--source", ".",
                "--report-format", "json", "--report-path", str(report_path),
                "--exit-code", "0", "--redact"]
-        try:
-            run_tool(cmd, cwd=workspace)
-        except Exception:
-            # Tool failed or unavailable; return no findings.
-            return []
+        # Let ScannerUnavailable propagate; the pipeline layer handles it.
+        run_tool(cmd, cwd=workspace)
 
         if not report_path.exists():
             return []

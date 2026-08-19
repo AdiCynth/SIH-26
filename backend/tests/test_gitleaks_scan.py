@@ -3,7 +3,7 @@ import json
 import pytest
 
 from app.scanners import gitleaks_scan
-from app.scanners.base import _resolve_executable
+from app.scanners.base import ScannerUnavailable, _resolve_executable
 
 SAMPLE_REPORT = [
     {
@@ -59,6 +59,15 @@ def test_diff_mode_filters_to_changed_files(tmp_path, monkeypatch):
     monkeypatch.setattr(gitleaks_scan, "run_tool", fake_run)
     findings = gitleaks_scan.scan(tmp_path, files=["config.py"])
     assert [f.file for f in findings] == ["config.py"]
+
+
+def test_missing_binary_propagates_rather_than_reporting_clean(tmp_path, monkeypatch):
+    def fake_run(cmd, cwd, timeout=600):
+        raise ScannerUnavailable("gitleaks is not installed")
+
+    monkeypatch.setattr(gitleaks_scan, "run_tool", fake_run)
+    with pytest.raises(ScannerUnavailable):
+        gitleaks_scan.scan(tmp_path)
 
 
 @pytest.mark.skipif(_resolve_executable("gitleaks") == "gitleaks", reason="gitleaks not installed")
