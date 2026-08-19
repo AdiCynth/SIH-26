@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -5,7 +7,14 @@ from app import routes_auth
 from app.config import settings
 from app.db import init_db
 
-app = FastAPI(title="VibeGuard")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
+
+
+app = FastAPI(title="VibeGuard", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -16,11 +25,6 @@ app.add_middleware(
 )
 
 app.include_router(routes_auth.router)
-
-
-@app.on_event("startup")
-def _startup() -> None:
-    init_db()
 
 
 @app.get("/health")
