@@ -1,0 +1,171 @@
+import pytest
+
+from app import pipeline
+from app.models import Scan, User
+from app.scanners.base import RawFinding, ScannerUnavailable
+
+
+@pytest.fixture()
+def scan_row(db, tmp_path):
+    user = User(email="p@b.com", password_hash="x")
+    db.add(user)
+    db.flush()
+    (tmp_path / "app.py").write_text("print(1)\n")
+    scan = Scan(user_id=user.id, repo_key="acme/demo", mode="full",
+                status="pending", source_type="git", source_ref=str(tmp_path))
+    db.add(scan)
+    db.commit()
+    return scan
+
+
+def fake_scanner(findings=None, error=None):
+    def scan(workspace, files=None):
+        if error:
+            raise error
+        return findings or []
+    return type("FakeScanner", (), {"scan": staticmethod(scan)})
+
+
+def test_successful_scan_persists_findings_and_scores(db, scan_row, monkeypatch):
+    monkeypatch.setattr(pipeline, "SCANNERS", [
+        fake_scanner([RawFinding("semgrep", "high", "app.py", 1, "eval used")]),
+        fake_scanner([RawFinding("lizard", "low", "dup.py", 2, "dup", "vibe-debt")]),
+    ])
+    monkeypatch.setattr(pipeline, "annotate", lambda f: [
+        {"explanation": "Bad.", "fix": "Remove it."} for _ in f
+    ])
+
+    pipeline.run_scan(scan_row.id)
+
+    db.expire_all()
+    scan = db.get(Scan, scan_row.id)
+    assert scan.status == "done"
+    assert scan.security_score == 85
+    assert scan.vibe_debt_score == 96
+    assert scan.ai_available is True
+    assert len(scan.findings) == 2
+    assert scan.findings[0].ai_explanation == "Bad."
+
+
+def test_scan_completes_when_one_scanner_fails(db, scan_row, monkeypatch):
+    monkeypatch.setattr(pipeline, "SCANNERS", [
+        fake_scanner([RawFinding("semgrep", "high", "app.py", 1, "eval used")]),
+        fake_scanner(error=ScannerUnavailable("gitleaks missing")),
+    ])
+    monkeypatch.setattr(pipeline, "annotate", lambda f: None)
+
+    pipeline.run_scan(scan_row.id)
+
+    db.expire_all()
+    scan = db.get(Scan, scan_row.id)
+    assert scan.status == "done"
+    assert len(scan.findings) == 1
+    assert "gitleaks" in (scan.error or "")
+
+
+def test_missing_scanner_recorded_not_silently_ignored(db, scan_row, monkeypatch):
+    """A scanner that raises ScannerUnavailable must be recorded, not treated as a clean run."""
+    monkeypatch.setattr(pipeline, "SCANNERS", [
+        fake_scanner([RawFinding("semgrep", "high", "app.py", 1, "eval used")]),
+        fake_scanner(error=ScannerUnavailable("gitleaks is not installed")),
+    ])
+    monkeypatch.setattr(pipeline, "annotate", lambda f: None)
+
+    pipeline.run_scan(scan_row.id)
+
+    db.expire_all()
+    scan = db.get(Scan, scan_row.id)
+    assert scan.status == "done"
+    assert len(scan.findings) == 1
+    assert scan.findings[0].tool == "semgrep"
+    # The failed tool must be named in scan.error — a user reading this must be able
+    # to tell which scanner never ran, not just that "something" went wrong.
+    assert scan.error is not None
+    assert "gitleaks" in scan.error
+
+
+def test_scan_fails_only_when_every_scanner_fails(db, scan_row, monkeypatch):
+    monkeypatch.setattr(pipeline, "SCANNERS", [
+        fake_scanner(error=ScannerUnavailable("semgrep missing")),
+        fake_scanner(error=ScannerUnavailable("gitleaks missing")),
+    ])
+    monkeypatch.setattr(pipeline, "annotate", lambda f: None)
+
+    pipeline.run_scan(scan_row.id)
+
+    db.expire_all()
+    scan = db.get(Scan, scan_row.id)
+    assert scan.status == "failed"
+    assert scan.findings == []
+
+
+def test_ai_failure_still_produces_a_report(db, scan_row, monkeypatch):
+    monkeypatch.setattr(pipeline, "SCANNERS", [
+        fake_scanner([RawFinding("semgrep", "high", "app.py", 1, "eval used")]),
+    ])
+    monkeypatch.setattr(pipeline, "annotate", lambda f: None)
+
+    pipeline.run_scan(scan_row.id)
+
+    db.expire_all()
+    scan = db.get(Scan, scan_row.id)
+    assert scan.status == "done"
+    assert scan.ai_available is False
+    assert scan.findings[0].ai_explanation is None
+    assert scan.security_score == 85
+
+
+def test_bad_source_marks_scan_failed(db, scan_row, monkeypatch):
+    scan_row.source_ref = "https://github.com/does-not/exist-xyz.git"
+    db.commit()
+    monkeypatch.setattr(pipeline, "SCANNERS", [fake_scanner([])])
+
+    pipeline.run_scan(scan_row.id)
+
+    db.expire_all()
+    scan = db.get(Scan, scan_row.id)
+    assert scan.status == "failed"
+    assert scan.error
+
+
+def test_zip_source_temp_file_deleted_after_successful_scan(db, tmp_path, monkeypatch):
+    import zipfile
+
+    user = User(email="z@b.com", password_hash="x")
+    db.add(user)
+    db.flush()
+    zip_path = tmp_path / "upload.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("app.py", "print(1)\n")
+    scan = Scan(user_id=user.id, repo_key="zip:demo", mode="full",
+                status="pending", source_type="zip", source_ref=str(zip_path))
+    db.add(scan)
+    db.commit()
+
+    monkeypatch.setattr(pipeline, "SCANNERS", [fake_scanner([])])
+    monkeypatch.setattr(pipeline, "annotate", lambda f: None)
+
+    pipeline.run_scan(scan.id)
+
+    assert not zip_path.exists()
+
+
+def test_zip_source_temp_file_deleted_after_failed_scan(db, tmp_path, monkeypatch):
+    user = User(email="z2@b.com", password_hash="x")
+    db.add(user)
+    db.flush()
+    zip_path = tmp_path / "bad-upload.zip"
+    zip_path.write_text("not a real zip")
+    scan = Scan(user_id=user.id, repo_key="zip:demo2", mode="full",
+                status="pending", source_type="zip", source_ref=str(zip_path))
+    db.add(scan)
+    db.commit()
+
+    monkeypatch.setattr(pipeline, "SCANNERS", [fake_scanner([])])
+
+    pipeline.run_scan(scan.id)
+
+    db.expire_all()
+    scan = db.get(Scan, scan.id)
+    assert scan.status == "failed"
+    assert not zip_path.exists()
