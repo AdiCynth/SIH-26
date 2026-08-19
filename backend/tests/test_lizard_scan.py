@@ -43,3 +43,23 @@ def test_diff_mode_scans_only_changed_files(tmp_path):
     findings = lizard_scan.scan(tmp_path, files=["messy.py"])
     assert findings
     assert {f.file for f in findings} == {"messy.py"}
+
+
+def test_does_not_false_positive_on_different_logic(tmp_path):
+    """Verify normalization does not over-match genuinely different functions."""
+    (tmp_path / "different.py").write_text(
+        "def sum_data(items):\n"
+        "    total = 0\n"
+        "    for item in items:\n"
+        "        total += item['value']\n"
+        "    return total\n"
+        "\n"
+        "def format_items(entries):\n"
+        "    result = []\n"
+        "    for entry in entries:\n"
+        "        result.append(str(entry))\n"
+        "    return result\n"
+    )
+    findings = lizard_scan.scan(tmp_path)
+    duplicates = [f for f in findings if "duplicate" in f.message.lower()]
+    assert not duplicates, "different logic should not be flagged as duplicates"

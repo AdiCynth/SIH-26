@@ -1,18 +1,18 @@
-def summarize_orders(data):
+def summarize_orders(orders):
     total = 0
     count = 0
-    for item in data:
-        total += item["amount"]
+    for order in orders:
+        total += order["amount"]
         count += 1
     average = total / count if count else 0
     return {"total": total, "count": count, "average": average}
 
 
-def summarize_refunds(data):
+def summarize_refunds(refunds):
     total = 0
     count = 0
-    for item in data:
-        total += item["amount"]
+    for order in refunds:
+        total += order["amount"]
         count += 1
     average = total / count if count else 0
     return {"total": total, "count": count, "average": average}

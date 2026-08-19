@@ -1,4 +1,5 @@
 import hashlib
+import re
 from collections import defaultdict
 from pathlib import Path
 
@@ -12,6 +13,22 @@ MAX_LENGTH = 60
 MIN_DUPLICATE_LINES = 5
 SKIP_DIRS = {".git", "node_modules", "venv", ".venv", "__pycache__", "dist", "build"}
 
+# Keywords worth preserving across the languages lizard handles; everything else
+# that looks like an identifier is a name and gets normalized away.
+_KEYWORDS = {
+    "if", "else", "elif", "for", "while", "return", "break", "continue", "def",
+    "class", "try", "except", "finally", "raise", "with", "as", "import", "from",
+    "in", "is", "not", "and", "or", "None", "True", "False", "function", "var",
+    "let", "const", "new", "this", "self", "null", "true", "false", "public",
+    "private", "static", "void", "int", "float", "str", "bool", "throw", "catch",
+}
+_IDENT = re.compile(r"[A-Za-z_]\w*")
+
+
+def _normalize_line(line: str) -> str:
+    """Normalize a line by replacing non-keyword identifiers with 'V'."""
+    return _IDENT.sub(lambda m: m.group(0) if m.group(0) in _KEYWORDS else "V", line.strip())
+
 
 def _candidate_files(workspace: Path, files: list[str] | None) -> list[Path]:
     if files:
@@ -23,14 +40,14 @@ def _candidate_files(workspace: Path, files: list[str] | None) -> list[Path]:
 
 
 def _body_fingerprint(path: Path, start: int, end: int) -> str | None:
-    """Hash a function body with whitespace normalized, so near-copies collide."""
+    """Hash a function body with identifiers normalized, so near-copies collide."""
     try:
         lines = path.read_text(errors="ignore").splitlines()[start - 1 : end]
     except OSError:
         return None
     # Skip the first line (def statement) and only hash the body
     body_lines = lines[1:] if len(lines) > 1 else lines
-    normalized = [line.strip() for line in body_lines if line.strip()]
+    normalized = [_normalize_line(line) for line in body_lines if line.strip()]
     if len(normalized) < MIN_DUPLICATE_LINES:
         return None
     return hashlib.sha256("\n".join(normalized).encode()).hexdigest()
