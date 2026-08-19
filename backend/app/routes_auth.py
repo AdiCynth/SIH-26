@@ -80,11 +80,14 @@ def exchange_code(code: str) -> dict:
         headers = {"Authorization": f"Bearer {access_token}",
                    "Accept": "application/vnd.github+json"}
         profile = http.get(f"{GITHUB_API}/user", headers=headers).json()
-        email = profile.get("email")
-        if not email:
-            emails = http.get(f"{GITHUB_API}/user/emails", headers=headers).json()
-            primary = next((e for e in emails if e.get("primary")), None)
-            email = primary["email"] if primary else f"{profile['id']}@users.noreply.github.com"
+
+        # Only use verified primary email from /user/emails endpoint
+        emails = http.get(f"{GITHUB_API}/user/emails", headers=headers).json()
+        verified_primary = next(
+            (e for e in emails if e.get("primary") and e.get("verified")),
+            None
+        )
+        email = verified_primary["email"] if verified_primary else f"{profile['id']}@users.noreply.github.com"
         return {"github_id": str(profile["id"]), "email": email}
 
 
