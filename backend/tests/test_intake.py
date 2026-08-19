@@ -87,3 +87,47 @@ def test_diff_mode_lists_only_changed_files(tmp_path):
 
     with prepare("git", str(repo), base_ref="HEAD~1", head_ref="HEAD") as ws:
         assert ws.files == ["changed.py"]
+
+
+def test_diff_mode_excludes_deleted_files(tmp_path):
+    import subprocess
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run = lambda *args: subprocess.run(args, cwd=repo, check=True, capture_output=True)
+    run("git", "init", "-q")
+    run("git", "config", "user.email", "t@t.com")
+    run("git", "config", "user.name", "t")
+    (repo / "kept.py").write_text("a = 1\n")
+    (repo / "removed.py").write_text("x = 1\n")
+    run("git", "add", "-A")
+    run("git", "commit", "-qm", "base")
+    (repo / "kept.py").write_text("a = 2\n")
+    (repo / "removed.py").unlink()
+    run("git", "add", "-A")
+    run("git", "commit", "-qm", "head")
+
+    with prepare("git", str(repo), base_ref="HEAD~1", head_ref="HEAD") as ws:
+        assert ws.files == ["kept.py"]
+
+
+def test_diff_mode_works_against_cloned_remote_non_default_branch(tmp_path):
+    import subprocess
+
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    run = lambda *args: subprocess.run(args, cwd=origin, check=True, capture_output=True)
+    run("git", "init", "-q", "-b", "main")
+    run("git", "config", "user.email", "t@t.com")
+    run("git", "config", "user.name", "t")
+    (origin / "main.py").write_text("a = 1\n")
+    run("git", "add", "-A")
+    run("git", "commit", "-qm", "base")
+    run("git", "checkout", "-qb", "feature")
+    (origin / "feature.py").write_text("b = 2\n")
+    run("git", "add", "-A")
+    run("git", "commit", "-qm", "feature work")
+    run("git", "checkout", "-q", "main")
+
+    with prepare("git", f"file://{origin}", base_ref="main", head_ref="feature") as ws:
+        assert ws.files == ["feature.py"]

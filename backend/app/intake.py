@@ -55,14 +55,28 @@ def _extract(zip_path: str, dest: Path) -> None:
         archive.extractall(dest)
 
 
+def _resolve_ref(repo: Path, ref: str) -> str:
+    """Resolve a ref that may only exist as a remote-tracking branch after a clone."""
+    for candidate in (ref, f"origin/{ref}"):
+        probe = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", candidate],
+            cwd=repo, capture_output=True, text=True, timeout=30,
+        )
+        if probe.returncode == 0:
+            return candidate
+    raise IntakeError(f"Unknown ref {ref!r}")
+
+
 def _changed_files(repo: Path, base_ref: str, head_ref: str) -> list[str]:
+    base = _resolve_ref(repo, base_ref)
+    head = _resolve_ref(repo, head_ref)
     result = subprocess.run(
-        ["git", "diff", "--name-only", f"{base_ref}...{head_ref}"],
+        ["git", "diff", "--name-only", "--diff-filter=d", f"{base}...{head}"],
         cwd=repo, capture_output=True, text=True, timeout=60,
     )
     if result.returncode != 0:
         raise IntakeError(f"Could not diff {base_ref}...{head_ref}: {result.stderr.strip()[:200]}")
-    return [line for line in result.stdout.splitlines() if (repo / line).exists()]
+    return result.stdout.splitlines()
 
 
 @contextmanager
@@ -88,6 +102,13 @@ def prepare(
 
         files = None
         if base_ref and head_ref:
+            head = _resolve_ref(workspace, head_ref)
+            checkout = subprocess.run(
+                ["git", "checkout", "--quiet", "--detach", head],
+                cwd=workspace, capture_output=True, text=True, timeout=60,
+            )
+            if checkout.returncode != 0:
+                raise IntakeError(f"Could not check out {head_ref!r}: {checkout.stderr.strip()[:200]}")
             files = _changed_files(workspace, base_ref, head_ref)
         yield Workspace(path=workspace, files=files)
     finally:
