@@ -238,11 +238,16 @@ def _empty_report(monkeypatch, module, flag, filename=None):
     monkeypatch.setattr(module, "run_tool", fake_run)
 
 
-def test_all_scanners_crashing_marks_the_scan_failed(db, scan_row, monkeypatch):
-    from app.scanners import depcheck_scan, gitleaks_scan, semgrep_scan
+def _empty_stdout(monkeypatch, module, stdout):
+    monkeypatch.setattr(module, "run_tool", lambda cmd, cwd, timeout=600: type(
+        "R", (), {"returncode": 0, "stdout": stdout, "stderr": ""})())
 
-    monkeypatch.setattr(pipeline, "SCANNERS", [semgrep_scan, gitleaks_scan, depcheck_scan])
-    for module in (semgrep_scan, gitleaks_scan, depcheck_scan):
+
+def test_all_scanners_crashing_marks_the_scan_failed(db, scan_row, monkeypatch):
+    from app.scanners import deps_scan, gitleaks_scan, semgrep_scan
+
+    monkeypatch.setattr(pipeline, "SCANNERS", [semgrep_scan, gitleaks_scan, deps_scan])
+    for module in (semgrep_scan, gitleaks_scan, deps_scan):
         _break_tool(monkeypatch, module)
     monkeypatch.setattr(pipeline, "annotate", lambda f: None)
 
@@ -255,12 +260,12 @@ def test_all_scanners_crashing_marks_the_scan_failed(db, scan_row, monkeypatch):
 
 
 def test_only_semgrep_crashing_still_names_it_in_the_error(db, scan_row, monkeypatch):
-    from app.scanners import depcheck_scan, gitleaks_scan, semgrep_scan
+    from app.scanners import deps_scan, gitleaks_scan, semgrep_scan
 
-    monkeypatch.setattr(pipeline, "SCANNERS", [semgrep_scan, gitleaks_scan, depcheck_scan])
+    monkeypatch.setattr(pipeline, "SCANNERS", [semgrep_scan, gitleaks_scan, deps_scan])
     _break_tool(monkeypatch, semgrep_scan)
     _empty_report(monkeypatch, gitleaks_scan, "--report-path")
-    _empty_report(monkeypatch, depcheck_scan, "--out", "dependency-check-report.json")
+    _empty_stdout(monkeypatch, deps_scan, '{"results": null}')
     monkeypatch.setattr(pipeline, "annotate", lambda f: None)
 
     pipeline.run_scan(scan_row.id)

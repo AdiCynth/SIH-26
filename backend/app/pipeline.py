@@ -5,13 +5,13 @@ from app.db import SessionLocal
 from app.intake import IntakeError, prepare
 from app.models import Finding, Scan
 from app.reasoning import annotate
-from app.scanners import depcheck_scan, gitleaks_scan, lizard_scan, semgrep_scan
+from app.scanners import deps_scan, gitleaks_scan, lizard_scan, semgrep_scan
 from app.scanners.base import RawFinding
 from app.scoring import security_score, vibe_debt_score
 
 log = logging.getLogger(__name__)
 
-SCANNERS = [semgrep_scan, gitleaks_scan, depcheck_scan, lizard_scan]
+SCANNERS = [semgrep_scan, gitleaks_scan, deps_scan, lizard_scan]
 
 _ERROR_MAX = 500
 
