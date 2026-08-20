@@ -1,3 +1,5 @@
+from urllib.parse import parse_qs, urlsplit
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -14,11 +16,20 @@ def client(db):
     return TestClient(app)
 
 
+def _start_login(client) -> str:
+    """Walk the real /auth/github/login leg so the state cookie is set, and return
+    the state GitHub would echo back."""
+    r = client.get("/auth/github/login", follow_redirects=False)
+    return parse_qs(urlsplit(r.headers["location"]).query)["state"][0]
+
+
 def test_login_redirects_to_github(client):
     r = client.get("/auth/github/login", follow_redirects=False)
     assert r.status_code == 307
     assert r.headers["location"].startswith("https://github.com/login/oauth/authorize")
     assert "client_id=test-client-id" in r.headers["location"]
+    assert "state=" in r.headers["location"]
+    assert "vibeguard_oauth_state" in r.headers["set-cookie"]
 
 
 def test_callback_creates_user_and_sets_cookie(client, db, monkeypatch):
@@ -26,7 +37,8 @@ def test_callback_creates_user_and_sets_cookie(client, db, monkeypatch):
         routes_auth, "exchange_code",
         lambda code: {"github_id": "4242", "email": "octo@github.com"},
     )
-    r = client.get("/auth/github/callback?code=abc", follow_redirects=False)
+    state = _start_login(client)
+    r = client.get(f"/auth/github/callback?code=abc&state={state}", follow_redirects=False)
     assert r.status_code == 307
     assert r.headers["location"] == settings.frontend_url
     assert client.get("/auth/me").json()["email"] == "octo@github.com"
@@ -38,8 +50,10 @@ def test_callback_reuses_existing_github_user(client, db, monkeypatch):
         routes_auth, "exchange_code",
         lambda code: {"github_id": "4242", "email": "octo@github.com"},
     )
-    client.get("/auth/github/callback?code=abc", follow_redirects=False)
-    client.get("/auth/github/callback?code=def", follow_redirects=False)
+    client.get(f"/auth/github/callback?code=abc&state={_start_login(client)}",
+               follow_redirects=False)
+    client.get(f"/auth/github/callback?code=def&state={_start_login(client)}",
+               follow_redirects=False)
     assert db.query(User).filter(User.github_id == "4242").count() == 1
 
 
@@ -57,7 +71,8 @@ def test_callback_links_to_existing_password_account(client, db, monkeypatch):
         routes_auth, "exchange_code",
         lambda code: {"github_id": "4242", "email": "octo@github.com"},
     )
-    r = client.get("/auth/github/callback?code=abc", follow_redirects=False)
+    state = _start_login(client)
+    r = client.get(f"/auth/github/callback?code=abc&state={state}", follow_redirects=False)
     assert r.status_code == 307
     assert r.headers["location"] == settings.frontend_url
 
@@ -134,3 +149,61 @@ def test_exchange_code_raises_on_rejected_code(monkeypatch):
 
     assert exc_info.value.status_code == 401
     assert "rejected" in exc_info.value.detail.lower()
+
+
+# --- CSRF: without state, an attacker can log a victim into the attacker's account. ---
+
+def test_callback_without_state_is_rejected(client, db, monkeypatch):
+    monkeypatch.setattr(routes_auth, "exchange_code",
+                        lambda code: {"github_id": "9", "email": "attacker@github.com"})
+    r = client.get("/auth/github/callback?code=abc", follow_redirects=False)
+    assert r.status_code == 400
+    assert db.query(User).count() == 0
+
+
+def test_callback_with_mismatched_state_is_rejected(client, db, monkeypatch):
+    monkeypatch.setattr(routes_auth, "exchange_code",
+                        lambda code: {"github_id": "9", "email": "attacker@github.com"})
+    _start_login(client)  # sets a real state cookie
+    r = client.get("/auth/github/callback?code=abc&state=forged", follow_redirects=False)
+    assert r.status_code == 400
+    assert db.query(User).count() == 0
+
+
+def test_callback_state_is_single_use(client, db, monkeypatch):
+    monkeypatch.setattr(routes_auth, "exchange_code",
+                        lambda code: {"github_id": "4242", "email": "octo@github.com"})
+    state = _start_login(client)
+    assert client.get(f"/auth/github/callback?code=abc&state={state}",
+                      follow_redirects=False).status_code == 307
+    replayed = client.get(f"/auth/github/callback?code=abc&state={state}",
+                          follow_redirects=False)
+    assert replayed.status_code == 400
+
+
+def test_github_api_failure_becomes_502_not_a_traceback(monkeypatch):
+    import httpx
+
+    from app.routes_auth import exchange_code
+
+    class MockResponse:
+        def __init__(self, data=None, fail=False):
+            self._data, self._fail = data, fail
+
+        def json(self):
+            return self._data
+
+        def raise_for_status(self):
+            if self._fail:
+                raise httpx.HTTPStatusError("503", request=None, response=None)
+
+    monkeypatch.setattr(httpx.Client, "post",
+                        lambda self, url, **kw: MockResponse({"access_token": "t"}))
+    monkeypatch.setattr(httpx.Client, "get",
+                        lambda self, url, **kw: MockResponse(fail=True))
+
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as exc_info:
+        exchange_code("code")
+    assert exc_info.value.status_code == 502

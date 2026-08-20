@@ -1,4 +1,8 @@
+import secrets
+from datetime import UTC, datetime, timedelta
+
 import httpx
+import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
@@ -80,10 +84,21 @@ def exchange_code(code: str) -> dict:
 
         headers = {"Authorization": f"Bearer {access_token}",
                    "Accept": "application/vnd.github+json"}
-        profile = http.get(f"{GITHUB_API}/user", headers=headers).json()
+        # Unchecked, a GitHub hiccup returns an error body that fails on the next
+        # subscript and surfaces as a raw 500 traceback.
+        try:
+            profile_resp = http.get(f"{GITHUB_API}/user", headers=headers)
+            profile_resp.raise_for_status()
+            emails_resp = http.get(f"{GITHUB_API}/user/emails", headers=headers)
+            emails_resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=502, detail=f"GitHub is not responding correctly: {exc}"
+            ) from exc
+        profile = profile_resp.json()
 
         # Only use verified primary email from /user/emails endpoint
-        emails = http.get(f"{GITHUB_API}/user/emails", headers=headers).json()
+        emails = emails_resp.json()
         verified_primary = next(
             (e for e in emails if e.get("primary") and e.get("verified")),
             None
@@ -92,17 +107,53 @@ def exchange_code(code: str) -> dict:
         return {"github_id": str(profile["id"]), "email": email}
 
 
+STATE_COOKIE = "vibeguard_oauth_state"
+STATE_TTL = timedelta(minutes=10)
+
+
 @router.get("/github/login")
 def github_login(request: Request):
     redirect_uri = str(request.url_for("github_callback"))
-    return RedirectResponse(
-        f"{GITHUB_AUTHORIZE}?client_id={settings.github_client_id}"
-        f"&redirect_uri={redirect_uri}&scope=read:user%20user:email"
+    # Without state, an attacker can force a victim's browser through a callback
+    # carrying the attacker's code, logging the victim into the attacker's account.
+    state = secrets.token_urlsafe(24)
+    signed = jwt.encode(
+        {"state": state, "exp": datetime.now(UTC) + STATE_TTL},
+        settings.jwt_secret, algorithm="HS256",
     )
+    response = RedirectResponse(
+        f"{GITHUB_AUTHORIZE}?client_id={settings.github_client_id}"
+        f"&redirect_uri={redirect_uri}&scope=read:user%20user:email&state={state}"
+    )
+    # Lax, not None: the callback is a top-level GET navigation back to this origin.
+    response.set_cookie(
+        STATE_COOKIE, signed, httponly=True, samesite="lax",
+        secure=settings.cookie_cross_site,
+        max_age=int(STATE_TTL.total_seconds()), path="/",
+    )
+    return response
+
+
+def _verify_state(request: Request, state: str | None) -> None:
+    signed = request.cookies.get(STATE_COOKIE)
+    if not signed or not state:
+        raise HTTPException(status_code=400, detail="Missing OAuth state")
+    try:
+        expected = jwt.decode(signed, settings.jwt_secret, algorithms=["HS256"])["state"]
+    except jwt.PyJWTError as exc:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state") from exc
+    if not secrets.compare_digest(expected, state):
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
 
 
 @router.get("/github/callback", name="github_callback")
-def github_callback(code: str, db: Session = Depends(get_db)):
+def github_callback(
+    request: Request,
+    code: str,
+    state: str | None = None,
+    db: Session = Depends(get_db),
+):
+    _verify_state(request, state)
     account = exchange_code(code)
     user = db.query(User).filter(User.github_id == account["github_id"]).first()
     if user is None:
@@ -115,4 +166,5 @@ def github_callback(code: str, db: Session = Depends(get_db)):
         db.commit()
     response = RedirectResponse(settings.frontend_url)
     set_auth_cookie(response, create_token(user.id))
+    response.delete_cookie(STATE_COOKIE, path="/")  # single use
     return response
