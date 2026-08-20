@@ -57,10 +57,13 @@ def test_pipeline_reports_secrets_vulns_and_vibe_debt(db, scan_of_fixture, monke
         assert any("flask" in f.message.lower() for f in scan.findings), \
             "vulnerable flask dependency missed"
 
-    # dependency-check.sh (no Java on this machine) is expected to fail here.
-    # A scanner that cannot run must be named in scan.error, not silently dropped.
-    assert scan.error is not None
-    assert "depcheck_scan" in scan.error or "dependency-check" in scan.error
+    # On a machine without dependency-check.sh, that scanner is expected to fail —
+    # and a scanner that cannot run must be named in scan.error, not silently
+    # dropped. Guarded like the positive assertions above: installing the tool per
+    # the README must not start failing this test.
+    if not shutil.which("dependency-check.sh"):
+        assert scan.error is not None
+        assert "depcheck_scan" in scan.error or "dependency-check" in scan.error
 
     # Three of four scanners ran for real: partial failure must not sink the scan.
     assert scan.status == "done"

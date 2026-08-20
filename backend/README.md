@@ -20,12 +20,13 @@ createdb vibeguard
 
 ## Scanner setup
 
-Four scanners run per scan. Each covers a different capability, and a
-missing tool doesn't fail the scan — it just means that capability silently
-produces **zero findings** unless you check `scan.error`, which names the
-scanner that couldn't run (e.g. `"depcheck_scan: dependency-check.sh is not
-installed"`). A clean report and a broken scanner look identical unless you
-read that field.
+Four scanners run per scan. Each covers a different capability. A tool that
+**ran and found nothing** contributes zero findings; a tool that **could not
+run** — missing binary, crash, unreadable report, semgrep unable to reach
+its ruleset — raises, and is named in `scan.error` (e.g. `"depcheck_scan:
+dependency-check.sh is not installed"`). A partial failure still produces a
+report with `status="done"`; only an all-scanner failure marks the scan
+`failed`. A clean repo and a broken scanner are never reported the same way.
 
 | Tool | Capability | Install |
 |---|---|---|
