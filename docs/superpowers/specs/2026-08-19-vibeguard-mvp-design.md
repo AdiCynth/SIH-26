@@ -152,3 +152,29 @@ Next.js (TS, Tailwind)  ──▶  FastAPI backend  ──▶  Postgres
 - Large repos scanned synchronously by the tools (even though the API call
   is async) could be slow; no timeout/size cap is specified yet — add one
   if a demo repo turns out to hang.
+
+## Implementation deviations
+
+Recorded here rather than edited into the sections above, so the spec still
+reflects what was originally approved.
+
+**Vibe Debt scoring: lizard instead of Semgrep complexity/duplicate rules.**
+This spec derives the Vibe Debt score from "Semgrep complexity/duplicate-code
+rule findings" (see Components → Backend, above). Semgrep's public registry
+has almost no cross-language complexity or duplicate-detection rules, so
+that path would have produced an empty score. The implementation uses
+**lizard** instead (pip package, Python API, ~15 languages) for cyclomatic
+complexity and long functions, plus a normalized-body hash for duplicate
+detection — same output, same score, a tool that actually does the job.
+
+**2026-08-20 — OWASP Dependency-Check replaced with osv-scanner.**
+Dependency-Check (referenced throughout this spec as the dependency/license
+scanner) requires a JDK plus a multi-gigabyte NVD database download and had
+never actually run in this environment — its integration test was the
+suite's one permanent skip. It was replaced with **osv-scanner** (Google), a
+single Go binary with no database step: `osv-scanner scan source --format
+json` reports the same vulnerabilities (verified against the fixture repo's
+known-vulnerable Flask pin) and, with `--licenses=<allowlist>`, still returns
+a per-package SPDX license id, so the GPL/AGPL license-flagging feature
+described above is unaffected. Net effect: lighter dependency footprint, no
+Java requirement anywhere in the project, license data retained.

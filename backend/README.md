@@ -22,9 +22,9 @@ createdb vibeguard
 
 Four scanners run per scan. Each covers a different capability. A tool that
 **ran and found nothing** contributes zero findings; a tool that **could not
-run** — missing binary, crash, unreadable report, semgrep unable to reach
-its ruleset — raises, and is named in `scan.error` (e.g. `"depcheck_scan:
-dependency-check.sh is not installed"`). A partial failure still produces a
+run** — missing binary, crash, unreadable output, semgrep unable to reach
+its ruleset — raises, and is named in `scan.error` (e.g. `"deps_scan:
+osv-scanner is not installed"`). A partial failure still produces a
 report with `status="done"`; only an all-scanner failure marks the scan
 `failed`. A clean repo and a broken scanner are never reported the same way.
 
@@ -33,19 +33,7 @@ report with `status="done"`; only an all-scanner failure marks the scan
 | **Semgrep** | static analysis / code injection, hardcoded secrets in source | `pip install -r requirements.txt` (already listed) |
 | **Lizard** | vibe debt: cyclomatic complexity, duplicated logic | `pip install -r requirements.txt` (already listed) |
 | **Gitleaks** | secret scanning (API keys, tokens in git history/files) | `brew install gitleaks`, or a release from https://github.com/gitleaks/gitleaks/releases |
-| **OWASP Dependency-Check** | vulnerable dependencies, copyleft license flags | needs Java 11+ (macOS ships a stub `java` that is *not* a real runtime — check `java -version` actually prints a version, not an "install Java" prompt). Download from https://github.com/jeremylong/DependencyCheck/releases and put `dependency-check.sh` on your PATH. |
-
-Dependency-Check also needs its CVE database populated before first use —
-`--noupdate` (used here so every scan isn't rebuilding the database) reuses a
-local cache that starts out empty:
-
-```bash
-dependency-check.sh --updateonly
-```
-
-This pulls the full NVD feed and can take a while on a bare cache; it's
-**much faster with an NVD API key** (`export NVD_API_KEY=...` first — get one
-at https://nvd.nist.gov/developers/request-an-api-key).
+| **osv-scanner** | vulnerable dependencies, copyleft license flags | `brew install osv-scanner`, or a release from https://github.com/google/osv-scanner/releases. No database step — it's a single binary that queries the OSV API (or bundled offline data) on each run. |
 
 ### Semgrep telemetry
 
