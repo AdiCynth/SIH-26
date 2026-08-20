@@ -61,7 +61,7 @@ def test_callback_links_to_existing_password_account(client, db, monkeypatch):
     from app.auth import hash_password
 
     # Create an existing password account
-    existing_user = User(email="octo@github.com", password_hash=hash_password("hunter2"))
+    existing_user = User(email="octo@github.com", password_hash=hash_password("hunter2!"))
     db.add(existing_user)
     db.commit()
     original_password_hash = existing_user.password_hash

@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
 from app.auth import (COOKIE_NAME, cookie_policy, create_token, current_user,
@@ -19,7 +19,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 class Credentials(BaseModel):
     email: EmailStr
-    password: str
+    # The 8-char minimum existed only as an HTML attribute; curl accepted "".
+    password: str = Field(min_length=8)
 
 
 class UserOut(BaseModel):
@@ -29,9 +30,11 @@ class UserOut(BaseModel):
 
 @router.post("/signup", status_code=201, response_model=UserOut)
 def signup(body: Credentials, response: Response, db: Session = Depends(get_db)):
-    if db.query(User).filter(User.email == body.email).first():
+    # Normalize case so A@b.com and a@b.com are one account, not two.
+    email = body.email.lower()
+    if db.query(User).filter(User.email == email).first():
         raise HTTPException(status_code=409, detail="Email already registered")
-    user = User(email=body.email, password_hash=hash_password(body.password))
+    user = User(email=email, password_hash=hash_password(body.password))
     db.add(user)
     db.commit()
     set_auth_cookie(response, create_token(user.id))
@@ -40,7 +43,7 @@ def signup(body: Credentials, response: Response, db: Session = Depends(get_db))
 
 @router.post("/login", response_model=UserOut)
 def login(body: Credentials, response: Response, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == body.email).first()
+    user = db.query(User).filter(User.email == body.email.lower()).first()
     if user is None or not user.password_hash or not verify_password(
         body.password, user.password_hash
     ):

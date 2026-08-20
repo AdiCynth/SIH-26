@@ -121,3 +121,12 @@ def test_multi_batch_alignment(monkeypatch):
     assert result[0]["explanation"] == "FIRST_BATCH_ZERO"
     assert result[27]["explanation"] == "SECOND_BATCH_27"
     assert fake.call_count == 2
+
+
+def test_no_api_key_is_unavailable_even_with_zero_findings(monkeypatch):
+    """ai_available must reflect whether the layer works, not whether it had work."""
+    from app.config import settings
+    from app.reasoning import annotate
+
+    monkeypatch.setattr(settings, "openai_api_key", "")
+    assert annotate([]) is None

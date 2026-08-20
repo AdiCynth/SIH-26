@@ -11,14 +11,14 @@ def client(db):
 
 
 def test_password_hash_round_trip():
-    hashed = hash_password("hunter2")
-    assert hashed != "hunter2"
-    assert verify_password("hunter2", hashed)
+    hashed = hash_password("hunter2!")
+    assert hashed != "hunter2!"
+    assert verify_password("hunter2!", hashed)
     assert not verify_password("wrong", hashed)
 
 
 def test_signup_then_me(client):
-    r = client.post("/auth/signup", json={"email": "a@b.com", "password": "hunter2"})
+    r = client.post("/auth/signup", json={"email": "a@b.com", "password": "hunter2!"})
     assert r.status_code == 201
     me = client.get("/auth/me")
     assert me.status_code == 200
@@ -26,15 +26,15 @@ def test_signup_then_me(client):
 
 
 def test_duplicate_signup_rejected(client):
-    client.post("/auth/signup", json={"email": "dup@b.com", "password": "hunter2"})
-    r = client.post("/auth/signup", json={"email": "dup@b.com", "password": "hunter2"})
+    client.post("/auth/signup", json={"email": "dup@b.com", "password": "hunter2!"})
+    r = client.post("/auth/signup", json={"email": "dup@b.com", "password": "hunter2!"})
     assert r.status_code == 409
 
 
 def test_login_wrong_password_rejected(client):
-    client.post("/auth/signup", json={"email": "c@b.com", "password": "hunter2"})
+    client.post("/auth/signup", json={"email": "c@b.com", "password": "hunter2!"})
     client.post("/auth/logout")
-    r = client.post("/auth/login", json={"email": "c@b.com", "password": "nope"})
+    r = client.post("/auth/login", json={"email": "c@b.com", "password": "definitely-wrong"})
     assert r.status_code == 401
 
 
@@ -49,7 +49,7 @@ def test_cookie_is_lax_and_insecure_for_same_site_local_dev(client, monkeypatch)
     from app.config import settings
 
     monkeypatch.setattr(settings, "cookie_cross_site", False)
-    r = client.post("/auth/signup", json={"email": "lax@b.com", "password": "hunter2"})
+    r = client.post("/auth/signup", json={"email": "lax@b.com", "password": "hunter2!"})
     header = r.headers["set-cookie"].lower()
     assert "samesite=lax" in header
     assert "secure" not in header
@@ -59,7 +59,7 @@ def test_cookie_is_none_and_secure_when_cross_site(client, monkeypatch):
     from app.config import settings
 
     monkeypatch.setattr(settings, "cookie_cross_site", True)
-    r = client.post("/auth/signup", json={"email": "xsite@b.com", "password": "hunter2"})
+    r = client.post("/auth/signup", json={"email": "xsite@b.com", "password": "hunter2!"})
     header = r.headers["set-cookie"].lower()
     assert "samesite=none" in header
     assert "secure" in header, "SameSite=None without Secure is dropped by the browser"
@@ -82,3 +82,19 @@ def test_startup_allows_the_default_jwt_secret_on_localhost():
     remote_but_configured = Settings(jwt_secret="a-real-secret",
                                      frontend_url="https://vibeguard.example.com")
     check_production_secrets(remote_but_configured)  # must not raise
+
+
+def test_email_case_is_normalized_on_signup_and_login(client):
+    assert client.post("/auth/signup",
+                       json={"email": "Mixed@Case.com", "password": "hunter2!"}).status_code == 201
+    # Same address, different case: a duplicate account, not a second one.
+    assert client.post("/auth/signup",
+                       json={"email": "mixed@case.com", "password": "hunter2!"}).status_code == 409
+    assert client.post("/auth/login",
+                       json={"email": "MIXED@CASE.COM", "password": "hunter2!"}).status_code == 200
+
+
+@pytest.mark.parametrize("password", ["", "short"])
+def test_short_passwords_are_rejected(client, password):
+    r = client.post("/auth/signup", json={"email": "weak@b.com", "password": password})
+    assert r.status_code == 422

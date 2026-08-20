@@ -41,10 +41,12 @@ def _payload(findings: list[RawFinding], offset: int) -> str:
 
 def annotate(findings: list[RawFinding]) -> list[dict] | None:
     """Explain and suggest fixes for findings. None means the AI layer is unavailable."""
-    if not findings:
-        return []
+    # Key check first: with no key the layer is unavailable regardless of how many
+    # findings there are. Checked after, a zero-finding scan reported ai_available.
     if not settings.openai_api_key:
         return None
+    if not findings:
+        return []
 
     results: list[dict] = [{"explanation": "", "fix": ""} for _ in findings]
     try:

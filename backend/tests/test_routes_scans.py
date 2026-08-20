@@ -14,7 +14,7 @@ def client(db, monkeypatch):
     started: list[int] = []
     monkeypatch.setattr(routes_scans, "run_scan", lambda scan_id: started.append(scan_id))
     c = TestClient(app)
-    c.post("/auth/signup", json={"email": "s@b.com", "password": "hunter2"})
+    c.post("/auth/signup", json={"email": "s@b.com", "password": "hunter2!"})
     c.started = started
     return c
 
@@ -94,7 +94,7 @@ def test_get_scan_returns_findings(client, db):
 def test_cannot_read_another_users_scan(client, db):
     scan_id = client.post("/scans", data={"repo_url": "https://github.com/Acme/Demo"}).json()["id"]
     other = TestClient(app)
-    other.post("/auth/signup", json={"email": "other@b.com", "password": "hunter2"})
+    other.post("/auth/signup", json={"email": "other@b.com", "password": "hunter2!"})
     assert other.get(f"/scans/{scan_id}").status_code == 404
 
 
