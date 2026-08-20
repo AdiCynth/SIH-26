@@ -18,6 +18,7 @@ export default function ScanPage() {
 
   useEffect(() => {
     let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
     async function poll() {
       try {
@@ -29,7 +30,7 @@ export default function ScanPage() {
           setHistory((await listScans(report.repo_key)).reverse());
           return;
         }
-        setTimeout(poll, 3000);
+        timer = setTimeout(poll, 3000);
       } catch (err) {
         if (!active) return;
         if (err instanceof ApiError && err.status === 401) {
@@ -37,13 +38,14 @@ export default function ScanPage() {
           return;
         }
         setRefreshError(err instanceof Error ? err.message : "Could not load the scan");
-        setTimeout(poll, 3000);
+        timer = setTimeout(poll, 3000);
       }
     }
 
     poll();
     return () => {
       active = false;
+      clearTimeout(timer);
     };
   }, [scanId, router]);
 
@@ -104,16 +106,18 @@ export default function ScanPage() {
         </p>
       )}
 
-      {scan.status === "done" && !scan.ai_available && (
-        <p className="mt-6 rounded border border-amber-300 bg-amber-50 p-4 text-sm">
-          AI explanations unavailable for this scan — findings below are raw
-          scanner output.
+      {scan.status === "done" && scan.error && (
+        <p className="mt-6 rounded border border-orange-400 bg-orange-50 p-4 text-sm text-orange-900">
+          <span className="font-bold">Incomplete scan</span> — {scan.error}.
+          Findings from that tool are missing from this report; absence of
+          results does not mean absence of issues.
         </p>
       )}
 
-      {scan.status === "done" && scan.error && (
-        <p className="mt-4 rounded border border-amber-300 bg-amber-50 p-4 text-sm">
-          Partial scan — some tools did not run: {scan.error}
+      {scan.status === "done" && !scan.ai_available && (
+        <p className="mt-4 rounded border border-gray-300 bg-gray-50 p-4 text-sm text-gray-600">
+          AI explanations unavailable for this scan — findings below are raw
+          scanner output.
         </p>
       )}
 
