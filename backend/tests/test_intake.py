@@ -149,3 +149,23 @@ def test_diff_mode_works_against_cloned_remote_non_default_branch(tmp_path):
 
     with prepare("git", f"file://{origin}", base_ref="main", head_ref="feature") as ws:
         assert ws.files == ["feature.py"]
+
+
+def test_zip_bomb_is_rejected_before_extraction(tmp_path, monkeypatch):
+    """A tiny archive can declare gigabytes of content. The declared size is
+    checked before anything is written, so the disk never fills."""
+    from app import intake
+
+    zip_path = tmp_path / "bomb.zip"
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("padding.bin", b"\0" * (2 * 1024 * 1024))
+    zip_path.write_bytes(buf.getvalue())
+    assert zip_path.stat().st_size < 64 * 1024, "the crafted bomb should be tiny on disk"
+
+    monkeypatch.setattr(intake, "MAX_UNCOMPRESSED_BYTES", 512 * 1024)
+    dest = tmp_path / "ws"
+    dest.mkdir()
+    with pytest.raises(IntakeError, match="limit"):
+        _extract(str(zip_path), dest)
+    assert list(dest.iterdir()) == [], "nothing may be written before the check"

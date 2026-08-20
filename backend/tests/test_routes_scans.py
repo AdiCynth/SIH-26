@@ -149,3 +149,12 @@ def test_non_https_forge_urls_are_rejected_and_create_no_scan(client, db, bad_ur
 def test_gitlab_urls_are_accepted(client, db):
     r = client.post("/scans", data={"repo_url": "https://gitlab.com/Acme/Demo.git"})
     assert r.status_code == 201
+
+
+def test_oversized_upload_is_rejected_with_413(client, db, monkeypatch):
+    monkeypatch.setattr(routes_scans, "MAX_UPLOAD_BYTES", 512)
+    buf = io.BytesIO(b"x" * 4096)
+    before = db.query(Scan).count()
+    r = client.post("/scans", files={"zip_file": ("big.zip", buf, "application/zip")})
+    assert r.status_code == 413
+    assert db.query(Scan).count() == before

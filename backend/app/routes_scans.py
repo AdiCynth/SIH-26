@@ -23,6 +23,9 @@ router = APIRouter(prefix="/scans", tags=["scans"])
 # secrets and findings, with clone stderr echoed into scan.error as an SSRF oracle.
 _REPO_URL = re.compile(r"^https://(github\.com|gitlab\.com)/[\w.-]+/[\w.-]+(\.git)?/?$")
 
+# The upload is buffered in memory before it is written to a temp file.
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+
 
 class ScanCreated(BaseModel):
     id: int
@@ -93,7 +96,14 @@ def create_scan(
             raise HTTPException(status_code=400, detail=str(exc))
         source_type, source_ref = "git", repo_url
     elif zip_file is not None:
-        data = zip_file.file.read()
+        # Read one byte past the cap: enough to know it's oversized, without
+        # pulling an arbitrarily large upload into memory to find out.
+        data = zip_file.file.read(MAX_UPLOAD_BYTES + 1)
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Upload exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)}MB limit",
+            )
         if not data:
             raise HTTPException(status_code=400, detail="Uploaded file is empty")
         repo_key = repo_key_from_bytes(data)

@@ -14,6 +14,10 @@ class IntakeError(Exception):
     """Bad or unusable source input. Callers map this to HTTP 400."""
 
 
+# A 43KB zip bomb expands to gigabytes. Refuse before writing anything to disk.
+MAX_UNCOMPRESSED_BYTES = 500 * 1024 * 1024
+
+
 @dataclass
 class Workspace:
     path: Path
@@ -46,6 +50,12 @@ def _extract(zip_path: str, dest: Path) -> None:
     except (zipfile.BadZipFile, FileNotFoundError) as exc:
         raise IntakeError("Uploaded file is not a readable zip archive") from exc
     with archive:
+        declared = sum(info.file_size for info in archive.infolist())
+        if declared > MAX_UNCOMPRESSED_BYTES:
+            raise IntakeError(
+                f"Archive expands to {declared // (1024 * 1024)}MB, over the "
+                f"{MAX_UNCOMPRESSED_BYTES // (1024 * 1024)}MB limit"
+            )
         dest_root = dest.resolve()
         for member in archive.namelist():
             target = (dest / member).resolve()
