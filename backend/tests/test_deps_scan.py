@@ -103,6 +103,20 @@ def test_found_vulnerabilities_is_success_not_failure(tmp_path, monkeypatch):
     assert findings  # parsed fine despite the non-zero exit code
 
 
+def test_network_failure_raises_even_though_stdout_is_valid_json(tmp_path, monkeypatch):
+    """osv-scanner can't reach OSV.dev (e.g. proxy pointed at a closed port): it exits
+    127 but still prints well-formed JSON with empty results. That must not read as
+    a clean scan — the exit code is the only signal a network failure leaves."""
+    _patch_output(
+        monkeypatch,
+        '{"results": [], "experimental_config": {}}',
+        returncode=127,
+        stderr="Error during extraction: ... connection refused",
+    )
+    with pytest.raises(ScannerUnavailable, match="connection refused"):
+        deps_scan.scan(tmp_path)
+
+
 def test_unparseable_output_raises_rather_than_reporting_clean(tmp_path, monkeypatch):
     """A tool that could not run must raise, never return [] — [] means "clean"."""
     _patch_output(monkeypatch, "not json", returncode=127, stderr="failed to resolve path")

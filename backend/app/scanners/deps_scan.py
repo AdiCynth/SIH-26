@@ -40,14 +40,21 @@ def scan(workspace: Path, files: list[str] | None = None) -> list[RawFinding]:
     cmd = ["osv-scanner", "scan", "source", "--format", "json", "--recursive",
            "--allow-no-lockfiles", "--licenses=MIT", "."]
     result = run_tool(cmd, cwd=workspace)
+    # osv-scanner exits 0 for a clean run and 1 merely because it found
+    # vulnerabilities — both are successful runs and print valid JSON. Any other
+    # exit code (bad flags, a path it couldn't resolve, a crash) is a real failure
+    # and must raise even when stdout happens to parse: a network failure reaching
+    # OSV.dev exits 127 while still printing well-formed JSON with empty results,
+    # which would otherwise read as "clean, nothing to flag" instead of "couldn't
+    # check anything." Exit code and parseability are both checked; either failing
+    # must raise — never return [] for a run that didn't actually complete.
+    if result.returncode not in (0, 1):
+        raise ScannerUnavailable(
+            f"osv-scanner exited {result.returncode}: {result.stderr.strip()[:200]}"
+        )
     try:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError:
-        # osv-scanner exits 1 when it simply finds vulnerabilities — that's a normal,
-        # successful run and still prints valid JSON. Anything that leaves stdout
-        # unparseable (bad flags, a path it couldn't resolve, a crash) is a real
-        # failure and must raise, never return [] — [] would report a broken
-        # scanner as a clean one.
         raise ScannerUnavailable(
             f"osv-scanner exited {result.returncode} without JSON: {result.stderr.strip()[:200]}"
         )
