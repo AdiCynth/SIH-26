@@ -62,6 +62,29 @@ carry only the raw scanner output, with no AI-generated explanation or fix.
 `scan.ai_available` is `false` in that case so the frontend can show that the
 explanations are missing rather than pretending they don't exist.
 
+## Deploying off localhost
+
+Two settings only matter once the app leaves your laptop, and both fail in
+ways that look like something else:
+
+**`JWT_SECRET`** — the built-in default is a known literal, so any instance
+running on it has forgeable sessions for an arbitrary `user_id`. The app
+refuses to start if `JWT_SECRET` is still the default and `FRONTEND_URL` is
+not localhost. Generate one with:
+
+```bash
+python -c 'import secrets; print(secrets.token_urlsafe(32))'
+```
+
+**`COOKIE_CROSS_SITE`** — leave it `false` when frontend and backend share a
+host (localhost counts: ports don't affect SameSite). Set it `true` when they
+are on different hosts, which switches the session cookie from
+`SameSite=Lax` to `SameSite=None; Secure`. Get this wrong and the browser
+silently drops the cookie on every `credentials: "include"` fetch: login
+appears to succeed and every request after it 401s, which reads as an auth
+bug rather than a cookie-policy one. `SameSite=None` requires `Secure`, so
+cross-site deployments must be served over https.
+
 ## Run
 
 ```bash

@@ -26,10 +26,19 @@ def create_token(user_id: int) -> str:
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
 
 
+def cookie_policy() -> dict:
+    """SameSite=Lax only works when frontend and backend share a site. Split them
+    across hosts and the browser stops sending the cookie on credentialed fetches:
+    login appears to succeed and everything after it 401s."""
+    if settings.cookie_cross_site:
+        return {"samesite": "none", "secure": True}
+    return {"samesite": "lax", "secure": False}
+
+
 def set_auth_cookie(response: Response, token: str) -> None:
     response.set_cookie(
-        COOKIE_NAME, token, httponly=True, samesite="lax",
-        max_age=int(TOKEN_TTL.total_seconds()), path="/",
+        COOKIE_NAME, token, httponly=True,
+        max_age=int(TOKEN_TTL.total_seconds()), path="/", **cookie_policy(),
     )
 
 

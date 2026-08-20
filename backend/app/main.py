@@ -4,12 +4,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import routes_auth, routes_scans
-from app.config import settings
+from app.config import check_production_secrets, settings
 from app.db import init_db
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    check_production_secrets()
     init_db()
     yield
 

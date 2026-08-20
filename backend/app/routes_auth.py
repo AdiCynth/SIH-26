@@ -3,8 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
-from app.auth import (COOKIE_NAME, create_token, current_user, hash_password,
-                      set_auth_cookie, verify_password)
+from app.auth import (COOKIE_NAME, cookie_policy, create_token, current_user,
+                      hash_password, set_auth_cookie, verify_password)
 from app.config import settings
 from app.db import get_db
 from app.models import User
@@ -47,7 +47,8 @@ def login(body: Credentials, response: Response, db: Session = Depends(get_db)):
 
 @router.post("/logout", status_code=204)
 def logout(response: Response):
-    response.delete_cookie(COOKIE_NAME, path="/")
+    # Attributes must match the ones it was set with or the browser keeps it.
+    response.delete_cookie(COOKIE_NAME, path="/", **cookie_policy())
 
 
 @router.get("/me", response_model=UserOut)
