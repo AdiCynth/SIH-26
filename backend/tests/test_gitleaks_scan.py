@@ -35,13 +35,38 @@ def test_parses_report_into_high_severity_findings(tmp_path, monkeypatch):
     assert "AKIAIOSFODNN7EXAMPLE" not in findings[0].message  # never echo the secret
 
 
-def test_missing_report_yields_no_findings(tmp_path, monkeypatch):
+def test_missing_report_raises_rather_than_reporting_clean(tmp_path, monkeypatch):
+    """gitleaks ran and wrote no report: that is a failure, not a clean scan."""
     monkeypatch.setattr(
         gitleaks_scan, "run_tool",
         lambda cmd, cwd, timeout=600: type(
             "R", (), {"returncode": 1, "stdout": "", "stderr": "boom"}
         )(),
     )
+    with pytest.raises(ScannerUnavailable, match="boom"):
+        gitleaks_scan.scan(tmp_path)
+
+
+def test_unparseable_report_raises(tmp_path, monkeypatch):
+    def fake_run(cmd, cwd, timeout=600):
+        report_path = cmd[cmd.index("--report-path") + 1]
+        with open(report_path, "w") as handle:
+            handle.write("{not json")
+        return type("R", (), {"returncode": 1, "stdout": "", "stderr": "truncated"})()
+
+    monkeypatch.setattr(gitleaks_scan, "run_tool", fake_run)
+    with pytest.raises(ScannerUnavailable):
+        gitleaks_scan.scan(tmp_path)
+
+
+def test_empty_report_is_a_clean_run(tmp_path, monkeypatch):
+    def fake_run(cmd, cwd, timeout=600):
+        report_path = cmd[cmd.index("--report-path") + 1]
+        with open(report_path, "w") as handle:
+            handle.write("[]")
+        return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(gitleaks_scan, "run_tool", fake_run)
     assert gitleaks_scan.scan(tmp_path) == []
 
 

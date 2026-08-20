@@ -41,14 +41,48 @@ def test_parses_results_into_findings(tmp_path, monkeypatch):
     assert findings[1].severity == "medium"
 
 
-def test_unparseable_output_yields_no_findings(tmp_path, monkeypatch):
+def test_unparseable_output_raises_rather_than_reporting_clean(tmp_path, monkeypatch):
+    """A tool that ran and failed must raise, never return [] — [] means "clean"."""
     monkeypatch.setattr(
         semgrep_scan, "run_tool",
         lambda cmd, cwd, timeout=600: type(
             "R", (), {"returncode": 2, "stdout": "not json", "stderr": "boom"}
         )(),
     )
+    with pytest.raises(ScannerUnavailable, match="boom"):
+        semgrep_scan.scan(tmp_path)
+
+
+def test_errors_array_with_no_results_raises(tmp_path, monkeypatch):
+    """Valid JSON can still carry a failure: partial rule-download leaves errors[] set."""
+    payload = json.dumps({"results": [], "errors": [{"message": "rule download failed"}]})
+    monkeypatch.setattr(
+        semgrep_scan, "run_tool",
+        lambda cmd, cwd, timeout=600: type(
+            "R", (), {"returncode": 0, "stdout": payload, "stderr": ""}
+        )(),
+    )
+    with pytest.raises(ScannerUnavailable, match="rule download failed"):
+        semgrep_scan.scan(tmp_path)
+
+
+def test_clean_run_still_returns_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        semgrep_scan, "run_tool",
+        lambda cmd, cwd, timeout=600: type(
+            "R", (), {"returncode": 0, "stdout": '{"results": [], "errors": []}', "stderr": ""}
+        )(),
+    )
     assert semgrep_scan.scan(tmp_path) == []
+
+
+def test_missing_binary_propagates_rather_than_reporting_clean(tmp_path, monkeypatch):
+    def fake_run(cmd, cwd, timeout=600):
+        raise ScannerUnavailable("semgrep is not installed")
+
+    monkeypatch.setattr(semgrep_scan, "run_tool", fake_run)
+    with pytest.raises(ScannerUnavailable):
+        semgrep_scan.scan(tmp_path)
 
 
 def test_diff_mode_passes_only_changed_files(tmp_path, monkeypatch):

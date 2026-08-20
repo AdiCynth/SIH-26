@@ -213,3 +213,58 @@ def test_zip_source_temp_file_deleted_after_failed_scan(db, tmp_path, monkeypatc
     scan = db.get(Scan, scan.id)
     assert scan.status == "failed"
     assert not zip_path.exists()
+
+
+# --- The end-to-end guarantee: a tool that ran and failed is never a clean scan. ---
+#
+# These drive the REAL scanner modules (not fakes) with run_tool stubbed to look
+# like a crashed CLI, so they catch a regression in any single scanner's parse
+# guard — which per-module tests can only catch one module at a time.
+
+def _break_tool(monkeypatch, module, stderr="network unreachable"):
+    monkeypatch.setattr(module, "run_tool", lambda cmd, cwd, timeout=600: type(
+        "R", (), {"returncode": 2, "stdout": "not json", "stderr": stderr})())
+
+
+def _empty_report(monkeypatch, module, flag, filename=None):
+    def fake_run(cmd, cwd, timeout=600):
+        target = cmd[cmd.index(flag) + 1]
+        path = f"{target}/{filename}" if filename else target
+        with open(path, "w") as handle:
+            handle.write("[]" if filename is None else '{"dependencies": []}')
+        return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(module, "run_tool", fake_run)
+
+
+def test_all_scanners_crashing_marks_the_scan_failed(db, scan_row, monkeypatch):
+    from app.scanners import depcheck_scan, gitleaks_scan, semgrep_scan
+
+    monkeypatch.setattr(pipeline, "SCANNERS", [semgrep_scan, gitleaks_scan, depcheck_scan])
+    for module in (semgrep_scan, gitleaks_scan, depcheck_scan):
+        _break_tool(monkeypatch, module)
+    monkeypatch.setattr(pipeline, "annotate", lambda f: None)
+
+    pipeline.run_scan(scan_row.id)
+
+    db.expire_all()
+    scan = db.get(Scan, scan_row.id)
+    assert scan.status == "failed", "crashed scanners were reported as a clean scan"
+    assert scan.security_score is None
+
+
+def test_only_semgrep_crashing_still_names_it_in_the_error(db, scan_row, monkeypatch):
+    from app.scanners import depcheck_scan, gitleaks_scan, semgrep_scan
+
+    monkeypatch.setattr(pipeline, "SCANNERS", [semgrep_scan, gitleaks_scan, depcheck_scan])
+    _break_tool(monkeypatch, semgrep_scan)
+    _empty_report(monkeypatch, gitleaks_scan, "--report-path")
+    _empty_report(monkeypatch, depcheck_scan, "--out", "dependency-check-report.json")
+    monkeypatch.setattr(pipeline, "annotate", lambda f: None)
+
+    pipeline.run_scan(scan_row.id)
+
+    db.expire_all()
+    scan = db.get(Scan, scan_row.id)
+    assert scan.status == "done"
+    assert "semgrep" in (scan.error or ""), "a broken semgrep must be named, not hidden"

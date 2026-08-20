@@ -24,14 +24,22 @@ def scan(workspace: Path, files: list[str] | None = None) -> list[RawFinding]:
     with tempfile.TemporaryDirectory() as out_dir:
         cmd = ["dependency-check.sh", "--scan", ".", "--format", "JSON",
                "--out", out_dir, "--project", "vibeguard", "--noupdate"]
-        run_tool(cmd, cwd=workspace)
+        result = run_tool(cmd, cwd=workspace)
         report_path = Path(out_dir) / "dependency-check-report.json"
+        # An empty NVD cache makes dependency-check run and abort before writing a
+        # report. That is a failed scan, not a dependency-free project.
         if not report_path.exists():
-            return []
+            raise ScannerUnavailable(
+                f"dependency-check exited {result.returncode} without a report: "
+                f"{result.stderr.strip()[:200]}"
+            )
         try:
             report = json.loads(report_path.read_text())
         except json.JSONDecodeError:
-            return []
+            raise ScannerUnavailable(
+                f"dependency-check exited {result.returncode} with an unreadable "
+                f"report: {result.stderr.strip()[:200]}"
+            )
 
     findings = []
     for dependency in report.get("dependencies", []):

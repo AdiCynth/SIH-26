@@ -2,7 +2,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from app.scanners.base import RawFinding, run_tool
+from app.scanners.base import RawFinding, ScannerUnavailable, run_tool
 
 TOOL = "gitleaks"
 
@@ -14,14 +14,22 @@ def scan(workspace: Path, files: list[str] | None = None) -> list[RawFinding]:
                "--report-format", "json", "--report-path", str(report_path),
                "--exit-code", "0", "--redact"]
         # Let ScannerUnavailable propagate; the pipeline layer handles it.
-        run_tool(cmd, cwd=workspace)
+        result = run_tool(cmd, cwd=workspace)
 
+        # No parseable report after the tool actually ran means it failed, not that
+        # the repo is clean. Only a valid report with zero entries is a clean run.
         if not report_path.exists():
-            return []
+            raise ScannerUnavailable(
+                f"gitleaks exited {result.returncode} without a report: "
+                f"{result.stderr.strip()[:200]}"
+            )
         try:
             report = json.loads(report_path.read_text() or "[]")
         except json.JSONDecodeError:
-            return []
+            raise ScannerUnavailable(
+                f"gitleaks exited {result.returncode} with an unreadable report: "
+                f"{result.stderr.strip()[:200]}"
+            )
 
     changed = set(files) if files else None
     findings = []

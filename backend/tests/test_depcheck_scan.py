@@ -3,7 +3,7 @@ import json
 import pytest
 
 from app.scanners import depcheck_scan
-from app.scanners.base import _resolve_executable
+from app.scanners.base import ScannerUnavailable, _resolve_executable
 
 SAMPLE_REPORT = {
     "dependencies": [
@@ -74,13 +74,32 @@ def test_copyleft_licenses_become_license_findings(tmp_path, monkeypatch):
     assert "somelib:1.0" in licenses[0].message
 
 
-def test_missing_report_yields_no_findings(tmp_path, monkeypatch):
+def test_missing_report_raises_rather_than_reporting_clean(tmp_path, monkeypatch):
+    """dependency-check ran and aborted (e.g. empty NVD cache): not a clean scan."""
     monkeypatch.setattr(
         depcheck_scan, "run_tool",
         lambda cmd, cwd, timeout=600: type(
             "R", (), {"returncode": 1, "stdout": "", "stderr": "no java"}
         )(),
     )
+    with pytest.raises(ScannerUnavailable, match="no java"):
+        depcheck_scan.scan(tmp_path)
+
+
+def test_unparseable_report_raises(tmp_path, monkeypatch):
+    def fake_run(cmd, cwd, timeout=600):
+        out_dir = cmd[cmd.index("--out") + 1]
+        with open(f"{out_dir}/dependency-check-report.json", "w") as handle:
+            handle.write("{truncated")
+        return type("R", (), {"returncode": 1, "stdout": "", "stderr": "aborted"})()
+
+    monkeypatch.setattr(depcheck_scan, "run_tool", fake_run)
+    with pytest.raises(ScannerUnavailable):
+        depcheck_scan.scan(tmp_path)
+
+
+def test_empty_report_is_a_clean_run(tmp_path, monkeypatch):
+    _patch_report(monkeypatch, {"dependencies": []})
     assert depcheck_scan.scan(tmp_path) == []
 
 
