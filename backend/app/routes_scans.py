@@ -1,3 +1,4 @@
+import re
 import tempfile
 from datetime import datetime
 
@@ -15,6 +16,12 @@ from app.scanners.base import RawFinding
 from app.scoring import SEVERITY_ORDER, meets_threshold
 
 router = APIRouter(prefix="/scans", tags=["scans"])
+
+# An allowlist, not a denylist: anything else — file://, http://, ssh, a bare local
+# path — is rejected before a row is written. Without this, `git clone` will happily
+# read a server-local path or a file:// URL and the report hands back that code's
+# secrets and findings, with clone stderr echoed into scan.error as an SSRF oracle.
+_REPO_URL = re.compile(r"^https://(github\.com|gitlab\.com)/[\w.-]+/[\w.-]+(\.git)?/?$")
 
 
 class ScanCreated(BaseModel):
@@ -75,6 +82,11 @@ def create_scan(
     db: Session = Depends(get_db),
 ):
     if repo_url:
+        if not _REPO_URL.match(repo_url.strip()):
+            raise HTTPException(
+                status_code=400,
+                detail="Provide an https GitHub or GitLab repository URL",
+            )
         try:
             repo_key = repo_key_from_url(repo_url)
         except IntakeError as exc:

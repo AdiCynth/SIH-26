@@ -22,7 +22,7 @@ def scan_of_fixture(db, fixture_repo, tmp_path):
     db.add(user)
     db.flush()
     scan = Scan(user_id=user.id, repo_key="acme/vulnerable", mode="full",
-                status="pending", source_type="git", source_ref=str(workspace))
+                status="pending", source_type="local", source_ref=str(workspace))
     db.add(scan)
     db.commit()
     return scan

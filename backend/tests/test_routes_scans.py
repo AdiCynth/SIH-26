@@ -123,3 +123,29 @@ def test_status_endpoint_rejects_bad_severity(client, db):
     scan_id = client.post("/scans", data={"repo_url": "https://github.com/Acme/Demo"}).json()["id"]
     r = client.get(f"/scans/{scan_id}/status", params={"fail_on": "spicy"})
     assert r.status_code == 422
+
+
+@pytest.mark.parametrize("bad_url", [
+    "file:///etc/passwd",
+    "file:///Users/someone/private-repo",
+    "/Users/someone/private-repo",
+    "../../etc",
+    "http://github.com/Acme/Demo",
+    "https://evil.example.com/Acme/Demo",
+    "git@github.com:Acme/Demo.git",
+    "ssh://github.com/Acme/Demo",
+    "https://github.com/Acme/Demo/../../other",
+])
+def test_non_https_forge_urls_are_rejected_and_create_no_scan(client, db, bad_url):
+    """git clone reads file:// and local paths happily; the report would then hand
+    back the secrets and findings of any directory on the server."""
+    before = db.query(Scan).count()
+    r = client.post("/scans", data={"repo_url": bad_url})
+    assert r.status_code == 400, f"{bad_url!r} was accepted"
+    assert db.query(Scan).count() == before, f"{bad_url!r} persisted a scan row"
+    assert client.started == []
+
+
+def test_gitlab_urls_are_accepted(client, db):
+    r = client.post("/scans", data={"repo_url": "https://gitlab.com/Acme/Demo.git"})
+    assert r.status_code == 201

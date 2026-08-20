@@ -12,7 +12,7 @@ def scan_row(db, tmp_path):
     db.flush()
     (tmp_path / "app.py").write_text("print(1)\n")
     scan = Scan(user_id=user.id, repo_key="acme/demo", mode="full",
-                status="pending", source_type="git", source_ref=str(tmp_path))
+                status="pending", source_type="local", source_ref=str(tmp_path))
     db.add(scan)
     db.commit()
     return scan
@@ -116,6 +116,7 @@ def test_ai_failure_still_produces_a_report(db, scan_row, monkeypatch):
 
 
 def test_bad_source_marks_scan_failed(db, scan_row, monkeypatch):
+    scan_row.source_type = "git"
     scan_row.source_ref = "https://github.com/does-not/exist-xyz.git"
     db.commit()
     monkeypatch.setattr(pipeline, "SCANNERS", [fake_scanner([])])

@@ -63,6 +63,24 @@ def test_zip_slip_prefix_collision_is_rejected(tmp_path):
     assert not (tmp_path / "ws_sibling").exists()
 
 
+def test_local_source_type_rejects_a_non_directory(tmp_path):
+    with pytest.raises(IntakeError):
+        with prepare("local", str(tmp_path / "nope")):
+            pass
+
+
+def test_git_source_type_never_reads_a_local_directory(tmp_path):
+    """A directory path must not be silently treated as a repo to copy — that was
+    an arbitrary-server-path read sitting on the production path."""
+    repo = tmp_path / "secrets"
+    repo.mkdir()
+    (repo / "id_rsa").write_text("PRIVATE KEY\n")
+
+    with pytest.raises(IntakeError):
+        with prepare("git", str(repo)):
+            pass
+
+
 def test_unknown_source_type_rejected():
     with pytest.raises(IntakeError):
         with prepare("carrier-pigeon", "somewhere"):
@@ -85,7 +103,7 @@ def test_diff_mode_lists_only_changed_files(tmp_path):
     run("git", "add", "-A")
     run("git", "commit", "-qm", "head")
 
-    with prepare("git", str(repo), base_ref="HEAD~1", head_ref="HEAD") as ws:
+    with prepare("local", str(repo), base_ref="HEAD~1", head_ref="HEAD") as ws:
         assert ws.files == ["changed.py"]
 
 
@@ -107,7 +125,7 @@ def test_diff_mode_excludes_deleted_files(tmp_path):
     run("git", "add", "-A")
     run("git", "commit", "-qm", "head")
 
-    with prepare("git", str(repo), base_ref="HEAD~1", head_ref="HEAD") as ws:
+    with prepare("local", str(repo), base_ref="HEAD~1", head_ref="HEAD") as ws:
         assert ws.files == ["kept.py"]
 
 

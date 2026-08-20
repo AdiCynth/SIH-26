@@ -90,11 +90,16 @@ def prepare(
     workspace = Path(tempfile.mkdtemp(prefix="vibeguard-"))
     try:
         if source_type == "git":
+            _clone(source_ref, workspace)
+        elif source_type == "local":
+            # Copying a server-local directory is a test affordance. It is reachable
+            # only when the caller says so explicitly — never by sniffing whether a
+            # source_ref happens to name a directory, which put an arbitrary-path
+            # read on the production path.
             source = Path(source_ref)
-            if source.is_dir():
-                shutil.copytree(source, workspace, dirs_exist_ok=True)
-            else:
-                _clone(source_ref, workspace)
+            if not source.is_dir():
+                raise IntakeError(f"Not a directory: {source_ref!r}")
+            shutil.copytree(source, workspace, dirs_exist_ok=True)
         elif source_type == "zip":
             _extract(source_ref, workspace)
         else:

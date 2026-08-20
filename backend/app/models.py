@@ -33,7 +33,8 @@ class Scan(Base):
     ai_available: Mapped[bool] = mapped_column(default=False)
     error: Mapped[str | None] = mapped_column(String(500), default=None)
     # How to fetch the code at scan time.
-    source_type: Mapped[str] = mapped_column(String(8), default="git")  # git | zip
+    # git (clone a URL) | zip (extract an upload) | local (copy a directory, tests only)
+    source_type: Mapped[str] = mapped_column(String(8), default="git")
     source_ref: Mapped[str] = mapped_column(Text)  # clone URL, or temp zip path
     base_ref: Mapped[str | None] = mapped_column(String(255), default=None)
     head_ref: Mapped[str | None] = mapped_column(String(255), default=None)
