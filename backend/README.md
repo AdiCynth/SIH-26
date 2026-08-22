@@ -123,7 +123,11 @@ rate" here means the false *discovery* rate — the share of reported findings
 that turned out wrong, `FP / (TP + FP)` — not `FP / (FP + TN)`; the printed
 line spells this out since the number is meant to be quoted on its own. One
 label absorbs one finding, so a scanner that repeats itself books the repeats
-as false positives. Only `security` and `license` findings are scored —
+as false positives; the runner additionally splits that FP count into
+*duplicates* (repeat reports of a real, labeled issue — noise, not error)
+and *spurious* (findings that match no labeled issue at all — a real wrong
+finding), printed alongside the strict rate so neither number has to be
+inferred from the other. Only `security` and `license` findings are scored —
 vibe-debt and drift are threshold and impact signals, not defect claims.
 
 It exits non-zero above the target rate in `labels.json`, so it works in CI.

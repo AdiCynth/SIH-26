@@ -21,6 +21,8 @@ class Outcome:
     true_positives: int = 0
     false_positives: int = 0
     false_negatives: int = 0
+    duplicates: int = 0  # unmatched, but within tolerance of a label already claimed
+    spurious: int = 0  # unmatched, and matches no label at all — a real wrong finding
     unmatched: list[RawFinding] = field(default_factory=list)
     missed: list[Label] = field(default_factory=list)
 
@@ -60,6 +62,10 @@ def match(findings: list[RawFinding], labels: list[Label], tolerance: int) -> Ou
         if hit is None:
             outcome.false_positives += 1
             outcome.unmatched.append(f)
+            if any(_matches(f, l, tolerance) for l in labels):
+                outcome.duplicates += 1
+            else:
+                outcome.spurious += 1
         else:
             remaining.remove(hit)
             outcome.true_positives += 1

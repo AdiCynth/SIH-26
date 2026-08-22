@@ -64,3 +64,26 @@ def test_rates_of_an_empty_run_are_defined():
     assert outcome.precision == 1.0
     assert outcome.recall == 1.0
     assert outcome.false_positive_rate == 0.0
+
+
+def test_repeat_of_a_labeled_issue_is_a_duplicate_not_spurious():
+    """Two findings on one labeled line: the first is a TP, the second is an
+    FP — and since it still matches that same real label, it's a duplicate,
+    not a spurious (non-issue) finding."""
+    outcome = match([finding(), finding()], [Label(file="app.py", line=10)], tolerance=2)
+    assert outcome.false_positives == 1
+    assert outcome.duplicates == 1
+    assert outcome.spurious == 0
+
+
+def test_finding_matching_no_label_is_spurious():
+    outcome = match([finding(file="other.py")], [Label(file="app.py", line=10)], tolerance=2)
+    assert outcome.false_positives == 1
+    assert outcome.spurious == 1
+    assert outcome.duplicates == 0
+
+
+def test_duplicates_plus_spurious_equals_false_positives():
+    findings = [finding(), finding(), finding(file="other.py")]
+    outcome = match(findings, [Label(file="app.py", line=10)], tolerance=2)
+    assert outcome.duplicates + outcome.spurious == outcome.false_positives

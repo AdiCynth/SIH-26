@@ -59,7 +59,7 @@ def main() -> int:
 
     tolerance = config["line_tolerance"]
     target = config["target_false_positive_rate"]
-    totals = {"tp": 0, "fp": 0, "fn": 0}
+    totals = {"tp": 0, "fp": 0, "fn": 0, "duplicates": 0, "spurious": 0}
     rows, detail = [], []
 
     for entry in config["corpus"]:
@@ -71,16 +71,20 @@ def main() -> int:
         totals["tp"] += outcome.true_positives
         totals["fp"] += outcome.false_positives
         totals["fn"] += outcome.false_negatives
+        totals["duplicates"] += outcome.duplicates
+        totals["spurious"] += outcome.spurious
         rows.append((entry["repo"], outcome))
         detail.append({
             "repo": entry["repo"],
             "true_positives": outcome.true_positives,
             "false_positives": outcome.false_positives,
             "false_negatives": outcome.false_negatives,
+            "duplicates": outcome.duplicates,
+            "spurious": outcome.spurious,
             "precision": round(outcome.precision, 4),
             "recall": round(outcome.recall, 4),
-            "spurious": [f"{f.tool} {f.file}:{f.line} {f.message[:70]}"
-                         for f in outcome.unmatched],
+            "unmatched": [f"{f.tool} {f.file}:{f.line} {f.message[:70]}"
+                          for f in outcome.unmatched],
             "missed": [f"{l.file}:{l.line} {l.note}" for l in outcome.missed],
         })
 
@@ -103,14 +107,27 @@ def main() -> int:
     # That's the definition scanner vendors mean by "false-positive rate" and
     # the one this benchmark measures; spelled out here since the number is
     # meant to be quoted on its own.
-    print(f"\nfalse-positive rate: {fp_rate:.1%}  "
+    print(f"\nfalse-positive rate (strict): {fp_rate:.1%}  "
           f"(share of reported findings that were wrong: "
           f"FP/(TP+FP) = {totals['fp']}/{reported}; "
-          f"target <= {target:.0%})")
+          f"target <= {target:.0%}; gates pass/fail below)")
+    # A split of that same FP figure into two causes, since not every FP is a
+    # scanner pointing at a non-issue:
+    #   duplicates — matched a real, labeled issue, but that label was already
+    #                claimed by an earlier finding (the issue is real; it was
+    #                just reported more than once — noise, not error).
+    #   spurious   — matched no label at all, at any line, in that repo (the
+    #                finding does not point at anything real).
+    dup_rate = 0.0 if reported == 0 else totals["duplicates"] / reported
+    spurious_rate = 0.0 if reported == 0 else totals["spurious"] / reported
+    print(f"  of which duplicates: {totals['duplicates']} ({dup_rate:.1%} of reported) "
+          f"— a real, already-labeled issue reported again")
+    print(f"  of which spurious:   {totals['spurious']} ({spurious_rate:.1%} of reported) "
+          f"— matches no labeled issue at all")
     print(f"recall:              {recall:.1%}")
 
     for item in detail:
-        for line in item["spurious"]:
+        for line in item["unmatched"]:
             print(f"  FP  {item['repo']}: {line}")
         for line in item["missed"]:
             print(f"  FN  {item['repo']}: {line}")
@@ -120,6 +137,8 @@ def main() -> int:
             "false_positive_rate": round(fp_rate, 4),
             "precision": round(1 - fp_rate, 4),
             "recall": round(recall, 4),
+            "duplicate_rate": round(dup_rate, 4),
+            "spurious_rate": round(spurious_rate, 4),
             "target_false_positive_rate": target,
             "totals": totals,
             "per_repo": detail,
