@@ -59,7 +59,9 @@ and persists everything. The frontend polls the scan until it's `done` or
 
 ## Quickstart
 
-**Backend** (Python 3.11 — see `backend/README.md` for why the pin matters):
+**Backend** (Python 3.11 on macOS or Linux — the pinned semgrep has no
+Windows wheel, so Windows contributors need WSL2; see `backend/README.md`
+for both details):
 
 ```bash
 cd backend
