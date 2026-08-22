@@ -1,20 +1,32 @@
 "use client";
 
-import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import FindingCard from "@/components/FindingCard";
-import ScoreBadge from "@/components/ScoreBadge";
-import Sparkline from "@/components/Sparkline";
-import { ApiError, getScan, listScans, type ScanReport, type ScanSummary } from "@/lib/api";
+import AppShell from "@/components/layout/AppShell";
+import ScanOverview from "@/components/scans/ScanOverview";
+import ScanConsole from "@/components/scans/ScanConsole";
+import FindingsList from "@/components/scans/FindingsList";
+import RiskDistribution from "@/components/scans/RiskDistribution";
+import Alert from "@/components/ui/Alert";
+import { ButtonLink } from "@/components/ui/Button";
+import { ScanPageSkeleton } from "@/components/ui/Skeleton";
+import { ApiError, getScan, listScans, me, type ScanReport, type ScanSummary, type User } from "@/lib/api";
+import { formatDateTime } from "@/lib/format";
 
 export default function ScanPage() {
   const router = useRouter();
   const { id } = useParams<{ id: string }>();
   const scanId = Number(id);
+  const [user, setUser] = useState<User | null>(null);
   const [scan, setScan] = useState<ScanReport | null>(null);
   const [history, setHistory] = useState<ScanSummary[]>([]);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+
+  useEffect(() => {
+    me()
+      .then((u) => setUser(u))
+      .catch(() => router.push("/login"));
+  }, [router]);
 
   useEffect(() => {
     let active = true;
@@ -51,15 +63,17 @@ export default function ScanPage() {
 
   if (!scan) {
     return (
-      <main className="p-6 text-gray-500">
-        {refreshError ? (
-          <p className="text-red-600">
-            Lost contact with the server: {refreshError}. Retrying…
-          </p>
-        ) : (
-          "Loading…"
-        )}
-      </main>
+      <div className="min-h-screen bg-background">
+        <div className="mx-auto max-w-7xl px-4 py-8 lg:px-8">
+          {refreshError ? (
+            <Alert variant="warning">
+              Lost contact with the server: {refreshError}. Retrying…
+            </Alert>
+          ) : (
+            <ScanPageSkeleton />
+          )}
+        </div>
+      </div>
     );
   }
 
@@ -67,88 +81,98 @@ export default function ScanPage() {
     .filter((s) => s.security_score !== null)
     .map((s) => s.security_score as number);
 
+  const isActive = scan.status === "pending" || scan.status === "running";
+  const done = scan.status === "done";
+
   return (
-    <main className="mx-auto max-w-3xl p-6">
-      <Link href="/" className="text-sm underline">
-        ← All scans
-      </Link>
+    <AppShell
+      email={user?.email ?? null}
+      user={user}
+      variant="scan"
+      actions={
+        <ButtonLink href="/#new-scan" variant="secondary" size="sm">
+          New analysis
+        </ButtonLink>
+      }
+    >
+      <div className="flex flex-col gap-8 animate-fade-in">
+        {refreshError && (
+          <Alert variant="warning">
+            Lost contact with the server: {refreshError}. Retrying…
+          </Alert>
+        )}
 
-      {refreshError && (
-        <p className="mt-4 rounded border border-red-300 bg-red-50 p-3 text-sm text-red-600">
-          Lost contact with the server: {refreshError}. Retrying…
-        </p>
-      )}
+        <ScanOverview scan={scan} trend={trend.length > 1 ? trend : undefined} />
 
-      <header className="mt-4 flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">{scan.repo_key}</h1>
-          <p className="text-sm text-gray-500">
-            {scan.status}
-            {scan.mode === "diff" && " · diff only"} ·{" "}
-            {new Date(scan.created_at).toLocaleString()}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <ScoreBadge label="Security" score={scan.security_score} />
-          <ScoreBadge label="Vibe Debt" score={scan.vibe_debt_score} />
-        </div>
-      </header>
+        {isActive && <ScanConsole scan={scan} />}
 
-      {(scan.status === "pending" || scan.status === "running") && (
-        <p className="mt-6 rounded border bg-gray-50 p-4 text-sm">
-          Scanning… this page updates itself.
-        </p>
-      )}
+        {scan.status === "failed" && (
+          <Alert variant="error" title="Scan failed">
+            {scan.error ?? "An unknown error occurred during analysis. Check repository access and try again."}
+          </Alert>
+        )}
 
-      {scan.status === "failed" && (
-        <p className="mt-6 rounded border border-red-300 bg-red-50 p-4 text-sm">
-          Scan failed: {scan.error ?? "unknown error"}
-        </p>
-      )}
+        {done && scan.error && (
+          <Alert variant="warning" title="Incomplete scan">
+            {scan.error}. Findings from that tool are missing from this report;
+            absence of results does not mean absence of issues.
+          </Alert>
+        )}
 
-      {scan.status === "done" && scan.error && (
-        <p className="mt-6 rounded border border-orange-400 bg-orange-50 p-4 text-sm text-orange-900">
-          <span className="font-bold">Incomplete scan</span> — {scan.error}.
-          Findings from that tool are missing from this report; absence of
-          results does not mean absence of issues.
-        </p>
-      )}
+        {done && !scan.ai_available && (
+          <Alert variant="info">
+            AI explanations unavailable for this scan — findings below are raw scanner output.
+          </Alert>
+        )}
 
-      {scan.status === "done" && !scan.ai_available && (
-        <p className="mt-4 rounded border border-gray-300 bg-gray-50 p-4 text-sm text-gray-600">
-          AI explanations unavailable for this scan — findings below are raw
-          scanner output.
-        </p>
-      )}
-
-      {trend.length > 1 && (
-        <section className="mt-8">
-          <h2 className="mb-2 font-medium">Security score over time</h2>
-          <div className="text-gray-800">
-            <Sparkline points={trend} />
+        {done && (
+          <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
+            <FindingsList findings={scan.findings} aiAvailable={scan.ai_available} />
+            <aside className="flex flex-col gap-6">
+              {scan.findings.length > 0 && (
+                <RiskDistribution findings={scan.findings} />
+              )}
+              <ScanMetadata scan={scan} />
+            </aside>
           </div>
-          <p className="text-xs text-gray-500">
-            {trend.length} scans of {scan.repo_key}
-          </p>
-        </section>
-      )}
+        )}
+      </div>
+    </AppShell>
+  );
+}
 
-      {scan.status === "done" && (
-        <section className="mt-8">
-          <h2 className="mb-3 font-medium">
-            {scan.findings.length} finding{scan.findings.length === 1 ? "" : "s"}
-          </h2>
-          {scan.findings.length === 0 ? (
-            <p className="text-sm text-gray-500">Nothing flagged. Clean scan.</p>
-          ) : (
-            <ul className="flex flex-col gap-3">
-              {scan.findings.map((finding) => (
-                <FindingCard key={finding.id} finding={finding} />
-              ))}
-            </ul>
-          )}
-        </section>
-      )}
-    </main>
+function ScanMetadata({ scan }: { scan: ScanReport }) {
+  const rows: { label: string; value: React.ReactNode }[] = [
+    { label: "Scan ID", value: <span className="font-mono tabular-nums">#{scan.id}</span> },
+    { label: "Mode", value: <span className="font-mono uppercase">{scan.mode}</span> },
+    { label: "Status", value: <span className="font-mono capitalize">{scan.status}</span> },
+    {
+      label: "Created",
+      value: <time dateTime={scan.created_at} className="font-mono">{formatDateTime(scan.created_at)}</time>,
+    },
+    {
+      label: "AI explanations",
+      value: (
+        <span className={`font-mono ${scan.ai_available ? "text-status-success" : "text-text-muted"}`}>
+          {scan.ai_available ? "available" : "unavailable"}
+        </span>
+      ),
+    },
+  ];
+
+  return (
+    <div className="border border-border bg-white">
+      <div className="border-b border-border-subtle px-4 py-2.5">
+        <h3 className="text-[13px] font-semibold text-text-primary">Scan metadata</h3>
+      </div>
+      <dl className="flex flex-col divide-y divide-border-subtle">
+        {rows.map((row) => (
+          <div key={row.label} className="grid grid-cols-[110px_1fr] gap-3 px-4 py-2.5">
+            <dt className="text-[12px] text-text-muted">{row.label}</dt>
+            <dd className="min-w-0 text-[12px] text-text-primary">{row.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
   );
 }

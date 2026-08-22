@@ -1,23 +1,24 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import ScoreBadge from "@/components/ScoreBadge";
-import { createScan, listScans, logout, me, type ScanSummary } from "@/lib/api";
+import AppShell from "@/components/layout/AppShell";
+import ScanForm from "@/components/dashboard/ScanForm";
+import ScanHistoryTable from "@/components/dashboard/ScanHistoryTable";
+import SystemStatusStrip from "@/components/dashboard/SystemStatusStrip";
+import { DashboardSkeleton } from "@/components/ui/Skeleton";
+import { createScan, listScans, me, type ScanSummary, type User } from "@/lib/api";
+import { displayName, timeGreeting } from "@/lib/user";
 
 export default function Dashboard() {
   const router = useRouter();
-  const [email, setEmail] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [scans, setScans] = useState<ScanSummary[]>([]);
-  const [repoUrl, setRepoUrl] = useState("");
-  const [zip, setZip] = useState<File | null>(null);
-  const [baseRef, setBaseRef] = useState("");
-  const [headRef, setHeadRef] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [initialLoad, setInitialLoad] = useState(true);
 
   const refresh = useCallback(async () => {
     try {
@@ -27,37 +28,30 @@ export default function Dashboard() {
       setRefreshError(
         err instanceof Error ? err.message : "Could not refresh scans"
       );
+    } finally {
+      setInitialLoad(false);
     }
   }, []);
 
   useEffect(() => {
     me()
-      .then((user) => {
-        setEmail(user.email);
+      .then((u) => {
+        setUser(u);
         setAuthChecked(true);
       })
       .then(refresh)
       .catch(() => router.push("/login"));
   }, [refresh, router]);
 
-  // Past scans include pending/running ones; poll while any are unfinished.
   useEffect(() => {
     if (!scans.some((s) => s.status === "pending" || s.status === "running")) return;
     const timer = setInterval(refresh, 3000);
     return () => clearInterval(timer);
   }, [scans, refresh]);
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleSubmit(form: FormData) {
     setBusy(true);
     setError(null);
-    const form = new FormData();
-    if (repoUrl) form.append("repo_url", repoUrl);
-    if (zip) form.append("zip_file", zip);
-    if (baseRef && headRef) {
-      form.append("base_ref", baseRef);
-      form.append("head_ref", headRef);
-    }
     try {
       const created = await createScan(form);
       router.push(`/scans/${created.id}`);
@@ -68,95 +62,62 @@ export default function Dashboard() {
     }
   }
 
-  if (!authChecked) return null;
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen bg-background">
+        <div className="mx-auto max-w-7xl px-4 py-8 lg:px-8">
+          <DashboardSkeleton />
+        </div>
+      </div>
+    );
+  }
+
+  const name = displayName(user);
+  const greeting = timeGreeting();
+  const activeCount = scans.filter(
+    (s) => s.status === "running" || s.status === "pending"
+  ).length;
+  const repoCount = new Set(scans.map((s) => s.repo_key)).size;
+
+  let subtitle: string;
+  if (activeCount > 0 && repoCount > 0) {
+    subtitle = `You have ${activeCount} ${activeCount === 1 ? "analysis" : "analyses"} in progress across ${repoCount} ${repoCount === 1 ? "repository" : "repositories"} in your workspace.`;
+  } else if (repoCount > 0) {
+    subtitle = `Your security workspace is monitoring ${repoCount} ${repoCount === 1 ? "repository" : "repositories"} for vulnerabilities and code-health issues.`;
+  } else {
+    subtitle =
+      "Your security workspace is actively monitoring repository analysis and vulnerabilities.";
+  }
 
   return (
-    <main className="mx-auto max-w-3xl p-6">
-      <header className="mb-8 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">VibeGuard</h1>
-        <div className="flex items-center gap-3 text-sm text-gray-600">
-          <span>{email}</span>
-          <button
-            onClick={() => logout().then(() => router.push("/login"))}
-            className="underline"
-          >
-            Sign out
-          </button>
-        </div>
-      </header>
-
-      <form onSubmit={submit} className="mb-10 flex flex-col gap-3 rounded border p-4">
-        <h2 className="font-medium">Scan a repository</h2>
-        <input
-          type="url" placeholder="https://github.com/owner/repo" value={repoUrl}
-          onChange={(e) => setRepoUrl(e.target.value)}
-          className="rounded border border-gray-300 px-3 py-2"
-        />
-        <div className="text-center text-sm text-gray-500">or upload a zip</div>
-        <input
-          type="file" accept=".zip"
-          onChange={(e) => setZip(e.target.files?.[0] ?? null)}
-          className="text-sm"
-        />
-        <details className="text-sm">
-          <summary className="cursor-pointer text-gray-600">
-            Scan only a diff (optional)
-          </summary>
-          <div className="mt-2 flex gap-2">
-            <input
-              placeholder="base ref (e.g. main)" value={baseRef}
-              onChange={(e) => setBaseRef(e.target.value)}
-              className="flex-1 rounded border border-gray-300 px-3 py-2"
+    <AppShell email={user?.email ?? null} user={user} variant="dashboard">
+      <div className="flex flex-col gap-10 animate-fade-in">
+        <header className="flex flex-col gap-2">
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-text-muted">
+            <span
+              aria-hidden
+              className="size-1.5 rounded-full bg-status-success animate-pulse-dot"
             />
-            <input
-              placeholder="head ref (e.g. my-branch)" value={headRef}
-              onChange={(e) => setHeadRef(e.target.value)}
-              className="flex-1 rounded border border-gray-300 px-3 py-2"
-            />
-          </div>
-        </details>
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        <button
-          type="submit" disabled={busy || (!repoUrl && !zip)}
-          className="self-start rounded bg-black px-4 py-2 text-white disabled:opacity-50"
-        >
-          {busy ? "Starting…" : "Start scan"}
-        </button>
-      </form>
+            Security workspace
+          </span>
+          <h1 className="text-[26px] font-semibold tracking-tight text-text-primary sm:text-[28px]">
+            {greeting}, {name}
+          </h1>
+          <p className="max-w-2xl text-[14px] text-text-secondary">
+            {subtitle}
+          </p>
+        </header>
 
-      <h2 className="mb-3 font-medium">Past scans</h2>
-      {refreshError && (
-        <p className="mb-3 text-sm text-red-600">
-          Lost contact with the server: {refreshError}. Retrying…
-        </p>
-      )}
-      {scans.length === 0 ? (
-        <p className="text-sm text-gray-500">Nothing scanned yet.</p>
-      ) : (
-        <ul className="divide-y rounded border">
-          {scans.map((scan) => (
-            <li key={scan.id}>
-              <Link
-                href={`/scans/${scan.id}`}
-                className="flex items-center justify-between gap-3 p-3 hover:bg-gray-50"
-              >
-                <div>
-                  <div className="font-medium">{scan.repo_key}</div>
-                  <div className="text-xs text-gray-500">
-                    {scan.status}
-                    {scan.mode === "diff" && " · diff"} ·{" "}
-                    {new Date(scan.created_at).toLocaleString()}
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <ScoreBadge label="Security" score={scan.security_score} />
-                  <ScoreBadge label="Vibe Debt" score={scan.vibe_debt_score} />
-                </div>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
-    </main>
+        <SystemStatusStrip scans={scans} />
+
+        <ScanForm onSubmit={handleSubmit} busy={busy} error={error} />
+
+        <ScanHistoryTable
+          scans={scans}
+          loading={initialLoad && scans.length === 0}
+          refreshError={refreshError}
+        />
+      </div>
+    </AppShell>
   );
 }

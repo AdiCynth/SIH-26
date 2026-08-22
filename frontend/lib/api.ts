@@ -1,4 +1,13 @@
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+// Demo mode switch (enable with NEXT_PUBLIC_DEMO_MODE=true)
+const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+
+/* Demo integration point:
+   If DEMO_MODE is enabled, selected API functions below will delegate
+   to the demo implementations in `frontend/lib/demo/`. Keep all demo-only
+   code confined to that folder so it can be removed easily before commit.
+*/
+import * as demo from "./demo";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -7,6 +16,12 @@ export class ApiError extends Error {
 }
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  // If demo mode is enabled, route low-level requests to the demo layer.
+  if (DEMO_MODE) {
+    // demo.fetch mirrors the runtime behavior of the real backend fetch.
+    return demo.fetch<T>(path, init);
+  }
+
   const res = await fetch(`${BASE}${path}`, { credentials: "include", ...init });
   if (!res.ok) {
     const detail = (await res.json().catch(() => ({}))).detail;
@@ -59,16 +74,17 @@ const json = (body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 });
 
+// Auth functions — delegate to demo implementations when DEMO_MODE is true.
 export const signup = (email: string, password: string) =>
-  api<User>("/auth/signup", json({ email, password }));
+  DEMO_MODE ? demo.signup(email, password) : api<User>("/auth/signup", json({ email, password }));
 export const login = (email: string, password: string) =>
-  api<User>("/auth/login", json({ email, password }));
-export const logout = () => api<void>("/auth/logout", { method: "POST" });
-export const me = () => api<User>("/auth/me");
-export const githubLoginUrl = () => `${BASE}/auth/github/login`;
+  DEMO_MODE ? demo.login(email, password) : api<User>("/auth/login", json({ email, password }));
+export const logout = () => (DEMO_MODE ? demo.logout() : api<void>("/auth/logout", { method: "POST" }));
+export const me = () => (DEMO_MODE ? demo.me() : api<User>("/auth/me"));
+export const githubLoginUrl = () => (DEMO_MODE ? demo.githubLoginUrl() : `${BASE}/auth/github/login`);
 
 export const createScan = (form: FormData) =>
-  api<{ id: number; status: string }>("/scans", { method: "POST", body: form });
+  DEMO_MODE ? demo.createScan(form) : api<{ id: number; status: string }>("/scans", { method: "POST", body: form });
 export const listScans = (repoKey?: string) =>
-  api<ScanSummary[]>(`/scans${repoKey ? `?repo_key=${encodeURIComponent(repoKey)}` : ""}`);
-export const getScan = (id: number) => api<ScanReport>(`/scans/${id}`);
+  DEMO_MODE ? demo.listScans(repoKey) : api<ScanSummary[]>(`/scans${repoKey ? `?repo_key=${encodeURIComponent(repoKey)}` : ""}`);
+export const getScan = (id: number) => (DEMO_MODE ? demo.getScan(id) : api<ScanReport>(`/scans/${id}`));
