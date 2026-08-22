@@ -58,7 +58,7 @@ def test_pipeline_reports_secrets_vulns_and_vibe_debt(db, scan_of_fixture, monke
     assert any("flask" in f.message.lower() for f in scan.findings), \
         "vulnerable flask dependency missed"
 
-    # All four scanners run for real on this machine now: no scanner should fail,
+    # All five scanners run for real on this machine now: no scanner should fail,
     # so scan.error must be None — a future silent scanner failure trips this.
     assert scan.error is None
     assert scan.status == "done"

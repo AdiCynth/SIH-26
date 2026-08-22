@@ -104,3 +104,40 @@ def test_blast_radius_terminates_on_a_cycle():
     dependents = {"a.py": {"b.py"}, "b.py": {"a.py"}}
     radius = drift_scan._blast_radius(dependents, ["a.py"], max_depth=10)
     assert set(radius) == {"b.py"}
+
+
+def test_full_mode_produces_nothing(tmp_path):
+    _write(tmp_path, "a.py", "VALUE = 1\n")
+    _write(tmp_path, "b.py", "import a\n")
+    assert drift_scan.scan(tmp_path, None) == []
+
+
+def test_diff_mode_flags_the_importer_of_a_changed_file(tmp_path):
+    _write(tmp_path, "a.py", "VALUE = 1\n")
+    _write(tmp_path, "b.py", "import a\n")
+    findings = drift_scan.scan(tmp_path, ["a.py"])
+    assert [f.file for f in findings] == ["b.py"]
+    assert findings[0].category == "drift"
+    assert findings[0].tool == "drift"
+    assert "a.py" in findings[0].message
+
+
+def test_severity_falls_off_with_distance(tmp_path):
+    _write(tmp_path, "a.py", "VALUE = 1\n")
+    _write(tmp_path, "b.py", "import a\n")
+    _write(tmp_path, "c.py", "import b\n")
+    by_file = {f.file: f for f in drift_scan.scan(tmp_path, ["a.py"])}
+    assert by_file["b.py"].severity == "medium"
+    assert by_file["c.py"].severity == "low"
+
+
+def test_changed_files_are_never_their_own_finding(tmp_path):
+    _write(tmp_path, "a.py", "VALUE = 1\n")
+    _write(tmp_path, "b.py", "import a\n")
+    findings = drift_scan.scan(tmp_path, ["a.py", "b.py"])
+    assert findings == []
+
+
+def test_unknown_changed_file_is_ignored(tmp_path):
+    _write(tmp_path, "a.py", "VALUE = 1\n")
+    assert drift_scan.scan(tmp_path, ["README.md"]) == []

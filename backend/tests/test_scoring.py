@@ -48,3 +48,16 @@ def test_meets_threshold():
     assert not meets_threshold([make("high")], "high")
     assert not meets_threshold([make("critical")], "high")
     assert meets_threshold([], "info")
+
+
+def test_drift_findings_move_neither_score():
+    from app.scanners.base import RawFinding
+    from app.scoring import security_score, vibe_debt_score
+
+    drift = [
+        RawFinding(tool="drift", severity="medium", category="drift",
+                   file=f"m{i}.py", line=1, message="impacted")
+        for i in range(5)
+    ]
+    assert security_score(drift) == 100
+    assert vibe_debt_score(drift) == 100

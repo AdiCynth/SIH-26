@@ -4,11 +4,14 @@ import re
 from collections import defaultdict, deque
 from pathlib import Path, PurePosixPath
 
+from app.scanners.base import RawFinding
+
 TOOL = "drift"
 SKIP_DIRS = {".git", "node_modules", "venv", ".venv", "__pycache__", "dist", "build"}
 PY_EXT = {".py"}
 JS_EXT = {".js", ".jsx", ".mjs", ".ts", ".tsx"}
 MAX_DEPTH = 3
+_SEVERITY_BY_DEPTH = {1: "medium", 2: "low"}
 
 _JS_IMPORT = re.compile(
     r"""(?:from|require\(|import\()\s*['"]([^'"]+)['"]"""
@@ -129,3 +132,36 @@ def _blast_radius(
                 seen[importer] = (depth + 1, origin)
                 queue.append(importer)
     return {f: v for f, v in seen.items() if v[0] > 0}
+
+
+def scan(workspace: Path, files: list[str] | None = None) -> list[RawFinding]:
+    """Files a diff did not touch but that depend on files it did.
+
+    Full-tree scans have no changed set to walk out from, so they produce
+    nothing — this only has something to say about a diff.
+    """
+    if not files:
+        return []
+
+    sources = _source_files(workspace)
+    seeds = [rel for rel in files if rel in set(sources)]
+    if not seeds:
+        return []
+
+    dependents = _dependents(workspace, sources)
+    radius = _blast_radius(dependents, seeds, MAX_DEPTH)
+
+    findings = []
+    for impacted, (depth, origin) in sorted(radius.items()):
+        hops = "directly" if depth == 1 else f"{depth} hops away"
+        findings.append(RawFinding(
+            tool=TOOL,
+            severity=_SEVERITY_BY_DEPTH.get(depth, "info"),
+            category="drift",
+            file=impacted,
+            line=1,
+            message=f"'{impacted}' imports changed code ({hops}, via '{origin}') "
+                    f"but is not in this diff. Nothing here was re-reviewed — "
+                    f"check the contract it relies on still holds.",
+        ))
+    return findings
