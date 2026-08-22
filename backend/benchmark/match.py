@@ -41,10 +41,14 @@ class Outcome:
         return 1.0 - self.precision
 
 
+def _same_position(f: RawFinding, label: Label, tolerance: int) -> bool:
+    return f.file == label.file and abs(f.line - label.line) <= tolerance
+
+
 def _matches(f: RawFinding, label: Label, tolerance: int) -> bool:
     if label.tool and f.tool != label.tool:
         return False
-    return f.file == label.file and abs(f.line - label.line) <= tolerance
+    return _same_position(f, label, tolerance)
 
 
 def match(findings: list[RawFinding], labels: list[Label], tolerance: int) -> Outcome:
@@ -62,7 +66,7 @@ def match(findings: list[RawFinding], labels: list[Label], tolerance: int) -> Ou
         if hit is None:
             outcome.false_positives += 1
             outcome.unmatched.append(f)
-            if any(_matches(f, l, tolerance) for l in labels):
+            if any(_same_position(f, l, tolerance) for l in labels):
                 outcome.duplicates += 1
             else:
                 outcome.spurious += 1

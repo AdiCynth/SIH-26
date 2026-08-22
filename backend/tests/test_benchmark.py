@@ -87,3 +87,30 @@ def test_duplicates_plus_spurious_equals_false_positives():
     findings = [finding(), finding(), finding(file="other.py")]
     outcome = match(findings, [Label(file="app.py", line=10)], tolerance=2)
     assert outcome.duplicates + outcome.spurious == outcome.false_positives
+
+
+def test_finding_from_different_tool_at_labeled_position_is_a_duplicate():
+    """A tool-pinned label still marks that position as a real issue. A
+    finding there from a different tool doesn't book the TP (tool-sensitive),
+    but it also isn't spurious — it's a duplicate of a real, already-claimed
+    issue, not a wrong finding invented out of nothing."""
+    labels = [Label(file="app.py", line=10, tool="gitleaks")]
+    outcome = match([finding(tool="semgrep")], labels, tolerance=2)
+    assert outcome.true_positives == 0
+    assert outcome.false_positives == 1
+    assert outcome.duplicates == 1
+    assert outcome.spurious == 0
+
+
+def test_tool_pinned_label_still_not_satisfied_by_a_different_tool():
+    labels = [Label(file="app.py", line=10, tool="gitleaks")]
+    outcome = match([finding(tool="semgrep")], labels, tolerance=2)
+    assert outcome.true_positives == 0
+    assert outcome.false_negatives == 1
+
+
+def test_duplicates_plus_spurious_equals_false_positives_across_tools():
+    labels = [Label(file="app.py", line=10, tool="gitleaks")]
+    findings = [finding(tool="semgrep"), finding(file="other.py")]
+    outcome = match(findings, labels, tolerance=2)
+    assert outcome.duplicates + outcome.spurious == outcome.false_positives
