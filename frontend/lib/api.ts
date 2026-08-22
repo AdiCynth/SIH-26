@@ -38,7 +38,7 @@ export type Finding = {
   id: number;
   tool: string;
   severity: "critical" | "high" | "medium" | "low" | "info";
-  category: "security" | "vibe-debt" | "license";
+  category: "security" | "vibe-debt" | "license" | "drift";
   file: string;
   line: number;
   message: string;
