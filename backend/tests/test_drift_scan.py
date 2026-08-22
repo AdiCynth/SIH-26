@@ -141,3 +141,9 @@ def test_changed_files_are_never_their_own_finding(tmp_path):
 def test_unknown_changed_file_is_ignored(tmp_path):
     _write(tmp_path, "a.py", "VALUE = 1\n")
     assert drift_scan.scan(tmp_path, ["README.md"]) == []
+
+
+def test_drift_on_real_fixture_flags_the_dependent_module(clean_repo):
+    findings = drift_scan.scan(clean_repo, ["inventory.py"])
+    assert [f.file for f in findings] == ["report.py"]
+    assert findings[0].severity == "medium"

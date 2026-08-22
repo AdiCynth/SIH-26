@@ -27,3 +27,8 @@ def db():
 @pytest.fixture()
 def fixture_repo() -> Path:
     return Path(__file__).parent / "fixtures" / "vulnerable_repo"
+
+
+@pytest.fixture()
+def clean_repo() -> Path:
+    return Path(__file__).parent / "fixtures" / "clean_repo"
