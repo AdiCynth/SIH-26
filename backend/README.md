@@ -102,3 +102,31 @@ pieces in isolation.
 ```bash
 curl -s "http://localhost:8000/scans/$SCAN_ID/status?fail_on=high" | jq -e '.passed'
 ```
+
+## Measuring the false-positive rate
+
+The AI reasoning layer cannot invent findings — it annotates the exact index
+list it is given, and out-of-range indexes are dropped
+(`tests/test_reasoning.py::test_extra_annotations_are_discarded`). That is a
+property of the architecture, not a rate.
+
+The *scanners* do produce false positives, and that rate is measured:
+
+```bash
+python -m benchmark.run --json benchmark/results.json
+```
+
+The runner scans each repo in `benchmark/labels.json`, matches findings against
+hand-labeled true positives (same file, line within 2, tool if the label names
+one), and reports precision, recall, and the false-positive rate. "False-positive
+rate" here means the false *discovery* rate — the share of reported findings
+that turned out wrong, `FP / (TP + FP)` — not `FP / (FP + TN)`; the printed
+line spells this out since the number is meant to be quoted on its own. One
+label absorbs one finding, so a scanner that repeats itself books the repeats
+as false positives. Only `security` and `license` findings are scored —
+vibe-debt and drift are threshold and impact signals, not defect claims.
+
+It exits non-zero above the target rate in `labels.json`, so it works in CI.
+A scanner that is not installed aborts the run rather than being skipped: a
+partial run would silently drop that tool's false positives and report a
+flattering number for a tool set that never ran.
