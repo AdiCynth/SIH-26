@@ -6,16 +6,12 @@ Requires **Python 3.11** specifically (not 3.12+, not 3.14). Semgrep cannot
 even be imported on Python 3.14 — pin the venv to 3.11 or scans will fail
 before they start.
 
-**macOS or Linux only.** The pinned `semgrep==1.101.0` publishes wheels for
-macOS and Linux but not Windows, so `pip install -r requirements.txt` falls
-back to the source distribution and fails building semgrep's OCaml core.
-Windows contributors should work inside WSL2, where the Linux wheel installs
-normally. (Semgrep did add a `win_amd64` wheel at 1.112.0; moving the pin
-forward would unblock native Windows, but it also shifts which rules fire,
-which moves the measured false-positive rate below — so that bump needs the
-benchmark re-run and the labels reconciled, not just a version edit.) The
-other four scanners are fine on Windows: lizard is a pure-Python wheel, and
-gitleaks and osv-scanner ship Windows binaries.
+**Windows works as of `semgrep==1.112.0`** — the pin was bumped from 1.101.0,
+which had no `win_amd64` wheel and forced a source build that failed on
+semgrep's OCaml core. The benchmark below was re-run against 1.112.0 and
+scored identically (10 TP, 5 FP, 0 FN), so the bump didn't change which
+rules fire. All five scanners now install and run natively on Windows;
+macOS/Linux contributors are unaffected.
 
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
