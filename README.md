@@ -9,7 +9,7 @@ fix where possible.
 
 ## What it catches
 
-Four scanners run per scan, each covering a different capability:
+Five scanners run per scan, each covering a different capability:
 
 | Tool | Catches |
 |---|---|
@@ -17,6 +17,7 @@ Four scanners run per scan, each covering a different capability:
 | **Gitleaks** | Committed secrets — API keys, tokens, credentials in files (and git history, if present) |
 | **osv-scanner** | Known-vulnerable dependencies (CVE/OSV advisories) and copyleft license flags (AGPL/GPL) read off each dependency's manifest |
 | **Lizard** | "Vibe debt" — cyclomatic complexity and duplicated code, the kind of mess that accumulates when code ships faster than it's reviewed |
+| **Drift** | Integration drift — files that import code the diff changed but were not themselves reviewed. Diff scans only; a full-tree scan has no changed set to walk out from, so it reports nothing |
 
 A tool that ran and found nothing contributes zero findings. A tool that
 *could not run* (missing binary, crash, unparseable output) raises instead
@@ -28,7 +29,17 @@ An AI reasoning layer (OpenAI API) then annotates each raw finding with an
 explanation and a suggested fix. It never invents findings — it only
 reasons over what the deterministic scanners already reported — and if the
 call fails or no API key is configured, the report still ships with the raw
-findings intact.
+findings intact. That is a property of the architecture rather than a claim
+about the model: the layer annotates the exact index list it is handed, and
+an out-of-range index is dropped, so the annotated set can never grow.
+`backend/tests/test_reasoning.py::test_extra_annotations_are_discarded`
+locks it.
+
+The scanners themselves do produce false positives, and that rate is
+measured rather than asserted — see "Measuring the false-positive rate" in
+`backend/README.md`. On the current two-repo corpus: 100% recall, 0 spurious
+findings, and a 33.3% strict false-positive rate, every one of which is a
+real issue reported twice by overlapping rules rather than a wrong finding.
 
 ## Architecture
 
@@ -41,7 +52,7 @@ Next.js frontend  ──▶  FastAPI backend  ──▶  Postgres
 ```
 
 A scan submission clones the repo (or extracts the zip, or checks out a
-diff range) into a temp workspace, runs the four scanners against it,
+diff range) into a temp workspace, runs the five scanners against it,
 sends the combined findings to the AI reasoning layer, scores the result,
 and persists everything. The frontend polls the scan until it's `done` or
 `failed`.
@@ -83,6 +94,19 @@ Being upfront about what this MVP doesn't handle yet:
 - **The security score floors at 0.** A repo with a handful of high-severity
   findings and a repo riddled with critical ones can both read `0` — the
   score can't distinguish "bad" from "catastrophic" once it bottoms out.
+- **Drift resolves imports heuristically.** A module name two files both
+  claim maps to both, so an ambiguous import widens the blast radius rather
+  than narrowing it — the safe direction for a "check this too" signal, but
+  it does over-report. TypeScript path aliases are read from `tsconfig.json`
+  only in the common `"@/*": ["./*"]` shape, and a file the parser can't
+  handle contributes no import edges at all, so its dependents go unflagged.
+- **Drift caps at 25 findings per scan.** A change to a widely-imported
+  module can reach hundreds of files; the report keeps the closest 25 and
+  says how many more were suppressed.
+- **The benchmark number is not perfectly reproducible.** Semgrep's
+  `--config auto` fetches rules at scan time and osv.dev keeps adding
+  advisories, so the measured rate moves. Both drift it upward, never
+  flattering.
 - **A killed backend process strands a scan at `running`.** There's no
   reaper: if the process running a scan dies mid-scan, that scan's status
   never advances and nothing reclaims it.
