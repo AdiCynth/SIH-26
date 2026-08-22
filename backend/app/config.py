@@ -10,7 +10,7 @@ _LOCAL_HOSTS = ("localhost", "127.0.0.1", "[::1]")
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    database_url: str = "postgresql+psycopg://vibeguard:vibeguard@localhost:5432/vibeguard"
+    database_url: str
     jwt_secret: str = DEFAULT_JWT_SECRET
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
