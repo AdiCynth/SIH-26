@@ -6,21 +6,32 @@ Requires **Python 3.11** specifically (not 3.12+, not 3.14). Semgrep cannot
 even be imported on Python 3.14 — pin the venv to 3.11 or scans will fail
 before they start.
 
+**Windows works as of `semgrep==1.112.0`** — the pin was bumped from 1.101.0,
+which had no `win_amd64` wheel and forced a source build that failed on
+semgrep's OCaml core. The benchmark below was re-run against 1.112.0 and
+scored identically (10 TP, 5 FP, 0 FN), so the bump didn't change which
+rules fire. All five scanners now install and run natively on Windows;
+macOS/Linux contributors are unaffected.
+
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env   # then fill in OPENAI_API_KEY and the GitHub OAuth pair
 ```
 
-Postgres:
+Postgres — the default `DATABASE_URL` connects as the role `vibeguard`, so
+create the role as well as the database. `createdb` alone leaves the backend
+unable to connect, and it fails at startup rather than serving errors:
 
 ```bash
-createdb vibeguard
+createuser -s vibeguard 2>/dev/null || true
+psql -d postgres -c "ALTER ROLE vibeguard WITH PASSWORD 'vibeguard'"
+createdb -O vibeguard vibeguard
 ```
 
 ## Scanner setup
 
-Four scanners run per scan. Each covers a different capability. A tool that
+Five scanners run per scan. Each covers a different capability. A tool that
 **ran and found nothing** contributes zero findings; a tool that **could not
 run** — missing binary, crash, unreadable output, semgrep unable to reach
 its ruleset — raises, and is named in `scan.error` (e.g. `"deps_scan:
@@ -34,6 +45,7 @@ report with `status="done"`; only an all-scanner failure marks the scan
 | **Lizard** | vibe debt: cyclomatic complexity, duplicated logic | `pip install -r requirements.txt` (already listed) |
 | **Gitleaks** | secret scanning (API keys, tokens in git history/files) | `brew install gitleaks`, or a release from https://github.com/gitleaks/gitleaks/releases |
 | **osv-scanner** | vulnerable dependencies, copyleft license flags | `brew install osv-scanner`, or a release from https://github.com/google/osv-scanner/releases. No database step — it's a single binary that queries the OSV API (or bundled offline data) on each run. |
+| **Drift** | integration drift: files importing what the diff changed but left unreviewed | nothing to install — stdlib only. Diff scans only; a full-tree scan has no changed set to walk out from, so it reports nothing |
 
 ### Semgrep telemetry
 

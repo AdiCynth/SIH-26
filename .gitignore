@@ -16,3 +16,8 @@ frontend/.env.local
 
 # OS
 .DS_Store
+
+# Machine-local Claude Code state: launch.json holds absolute paths, the lock
+# file is runtime scratch.
+.claude/launch.json
+.claude/scheduled_tasks.lock
