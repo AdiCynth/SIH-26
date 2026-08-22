@@ -1,12 +1,14 @@
 import ast
 import os
 import re
-from pathlib import PurePosixPath
+from collections import defaultdict, deque
+from pathlib import Path, PurePosixPath
 
 TOOL = "drift"
 SKIP_DIRS = {".git", "node_modules", "venv", ".venv", "__pycache__", "dist", "build"}
 PY_EXT = {".py"}
 JS_EXT = {".js", ".jsx", ".mjs", ".ts", ".tsx"}
+MAX_DEPTH = 3
 
 _JS_IMPORT = re.compile(
     r"""(?:from|require\(|import\()\s*['"]([^'"]+)['"]"""
@@ -63,3 +65,67 @@ def _resolve_js(spec: str, rel: PurePosixPath, files: set[str]) -> list[str]:
     candidates += [f"{target}{ext}" for ext in sorted(JS_EXT)]
     candidates += [f"{target}/index{ext}" for ext in sorted(JS_EXT)]
     return [c for c in candidates if c in files]
+
+
+def _source_files(workspace: Path) -> list[str]:
+    known = PY_EXT | JS_EXT
+    found = []
+    for path in workspace.rglob("*"):
+        rel = path.relative_to(workspace)
+        if not path.is_file() or path.suffix not in known:
+            continue
+        if SKIP_DIRS & set(rel.parts):
+            continue
+        found.append(rel.as_posix())
+    return sorted(found)
+
+
+def _dependents(workspace: Path, files: list[str]) -> dict[str, set[str]]:
+    """Reverse import graph: dependents[target] = {files that import target}."""
+    file_set = set(files)
+    # ponytail: a module key that two files both claim maps to both, so an
+    # ambiguous import adds edges to each. Over-connecting slightly widens the
+    # blast radius, which is the safe direction for a "check this too" signal.
+    # Resolve properly (respect sys.path / package roots) if the noise shows.
+    by_key: dict[str, set[str]] = defaultdict(set)
+    for rel in files:
+        if PurePosixPath(rel).suffix in PY_EXT:
+            for key in _module_keys(PurePosixPath(rel)):
+                by_key[key].add(rel)
+
+    dependents: dict[str, set[str]] = defaultdict(set)
+    for rel in files:
+        path = workspace / rel
+        try:
+            source = path.read_text(errors="ignore")
+        except OSError:
+            continue
+        posix = PurePosixPath(rel)
+        targets: set[str] = set()
+        if posix.suffix in PY_EXT:
+            for name in _python_imports(source, posix):
+                targets |= by_key.get(name, set())
+        else:
+            for spec in _js_imports(source):
+                targets.update(_resolve_js(spec, posix, file_set))
+        for target in targets - {rel}:
+            dependents[target].add(rel)
+    return dict(dependents)
+
+
+def _blast_radius(
+    dependents: dict[str, set[str]], seeds: list[str], max_depth: int
+) -> dict[str, tuple[int, str]]:
+    """Files reachable from the changed set, with hop count and originating seed."""
+    seen: dict[str, tuple[int, str]] = {seed: (0, seed) for seed in seeds}
+    queue = deque(seeds)
+    while queue:
+        node = queue.popleft()
+        depth, origin = seen[node]
+        if depth >= max_depth:
+            continue
+        for importer in dependents.get(node, ()):
+            if importer not in seen:
+                seen[importer] = (depth + 1, origin)
+                queue.append(importer)
+    return {f: v for f, v in seen.items() if v[0] > 0}
