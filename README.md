@@ -66,17 +66,45 @@ cd backend
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env   # fill in OPENAI_API_KEY (optional) and GitHub OAuth
-createdb vibeguard
+
+# The default DATABASE_URL connects as the role `vibeguard`, so create the
+# role as well as the database — `createdb` alone leaves the backend unable
+# to connect, and it fails at startup rather than serving errors.
+createuser -s vibeguard 2>/dev/null || true
+psql -d postgres -c "ALTER ROLE vibeguard WITH PASSWORD 'vibeguard'"
+createdb -O vibeguard vibeguard
+
 uvicorn app.main:app --reload --port 8000
 ```
+
+Postgres must be running first (`brew services start postgresql@15`, or your
+platform's equivalent).
 
 **Frontend:**
 
 ```bash
 cd frontend
 npm install
+cp .env.local.example .env.local   # NEXT_PUBLIC_API_URL, defaults to localhost:8000
 npm run dev
 ```
+
+### "Failed to fetch" on the sign-in page
+
+That is the browser failing to reach the API at all, not a rejected
+password — a wrong password returns "Invalid credentials" from the backend.
+It means the backend is not answering on `NEXT_PUBLIC_API_URL`. In order of
+likelihood:
+
+1. **The backend is not running.** Check with `curl localhost:8000/health` —
+   it should return `{"status":"ok"}`.
+2. **The backend crashed at startup on the database.** It calls `init_db()`
+   in its lifespan, so a bad `DATABASE_URL`, a missing `vibeguard` role, or a
+   stopped Postgres means it never binds the port. Read the uvicorn output.
+3. **CORS.** The backend only allows the origin in its `FRONTEND_URL`
+   (default `http://localhost:3000`). Serving the frontend on another port or
+   host without updating `FRONTEND_URL` fails the preflight, which also
+   surfaces as "Failed to fetch".
 
 See `backend/README.md` for scanner installs (Semgrep and Lizard come from
 `requirements.txt`; Gitleaks and osv-scanner are separate binaries) and
