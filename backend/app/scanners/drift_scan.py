@@ -144,7 +144,8 @@ def scan(workspace: Path, files: list[str] | None = None) -> list[RawFinding]:
         return []
 
     sources = _source_files(workspace)
-    seeds = [rel for rel in files if rel in set(sources)]
+    source_set = set(sources)
+    seeds = [rel for rel in files if rel in source_set]
     if not seeds:
         return []
 
@@ -159,7 +160,7 @@ def scan(workspace: Path, files: list[str] | None = None) -> list[RawFinding]:
             severity=_SEVERITY_BY_DEPTH.get(depth, "info"),
             category="drift",
             file=impacted,
-            line=1,
+            line=0,
             message=f"'{impacted}' imports changed code ({hops}, via '{origin}') "
                     f"but is not in this diff. Nothing here was re-reviewed — "
                     f"check the contract it relies on still holds.",
