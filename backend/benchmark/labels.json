@@ -10,7 +10,7 @@
         {"file": "app.py", "line": 20, "tool": "semgrep", "note": "debug server bound to 0.0.0.0"},
         {"file": "app.py", "line": 20, "tool": "semgrep", "note": "flask debug=True enabled"},
         {"file": "config.py", "line": 4, "tool": "semgrep", "note": "AWS access key id"},
-        {"file": "config.py", "line": 5, "note": "AWS secret key (caught by semgrep or gitleaks)"},
+        {"file": "config.py", "line": 5, "tool": "semgrep", "note": "AWS secret key (semgrep has a dedicated rule for it; gitleaks also reports this line via its generic-API-key rule and books as a duplicate)"},
         {"file": "requirements.txt", "line": 0, "tool": "osv-scanner", "note": "flask 0.12.2 CVE-2018-1000656"},
         {"file": "requirements.txt", "line": 0, "tool": "osv-scanner", "note": "flask 0.12.2 CVE-2019-1010083"},
         {"file": "requirements.txt", "line": 0, "tool": "osv-scanner", "note": "flask 0.12.2 CVE-2023-30861"},

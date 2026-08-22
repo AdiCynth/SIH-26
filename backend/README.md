@@ -127,8 +127,12 @@ as false positives; the runner additionally splits that FP count into
 *duplicates* (repeat reports of a real, labeled issue — noise, not error)
 and *spurious* (findings that match no labeled issue at all — a real wrong
 finding), printed alongside the strict rate so neither number has to be
-inferred from the other. Only `security` and `license` findings are scored —
-vibe-debt and drift are threshold and impact signals, not defect claims.
+inferred from the other. That duplicate/spurious split is decided purely by
+line proximity to a label, not by matching the finding's tool or message —
+so a genuinely wrong finding that happens to land within tolerance of an
+unrelated real label is counted as a duplicate, not spurious. Only `security`
+and `license` findings are scored — vibe-debt and drift are threshold and
+impact signals, not defect claims.
 
 It exits non-zero above the target rate in `labels.json`, so it works in CI.
 A scanner that is not installed aborts the run rather than being skipped: a

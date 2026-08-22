@@ -50,6 +50,13 @@ def test_meets_threshold():
     assert meets_threshold([], "info")
 
 
+def test_meets_threshold_ignores_drift_findings():
+    """Drift asserts no defect exists, so it must not be able to fail a CI
+    gate even at a low fail_on threshold."""
+    drift = [make("medium", category="drift")] * 5
+    assert meets_threshold(drift, "medium")
+
+
 def test_drift_findings_move_neither_score():
     from app.scanners.base import RawFinding
     from app.scoring import security_score, vibe_debt_score

@@ -147,3 +147,42 @@ def test_drift_on_real_fixture_flags_the_dependent_module(clean_repo):
     findings = drift_scan.scan(clean_repo, ["inventory.py"])
     assert [f.file for f in findings] == ["report.py"]
     assert findings[0].severity == "medium"
+
+
+def _fan_out(tmp_path, count):
+    _write(tmp_path, "a.py", "VALUE = 1\n")
+    for i in range(count):
+        _write(tmp_path, f"b{i:03}.py", "import a\n")
+
+
+def test_no_truncation_note_at_or_below_the_cap(tmp_path):
+    _fan_out(tmp_path, drift_scan.MAX_FINDINGS)
+    findings = drift_scan.scan(tmp_path, ["a.py"])
+    assert len(findings) == drift_scan.MAX_FINDINGS
+    assert "more" not in findings[-1].message
+
+
+def test_truncation_triggers_above_the_cap_and_notes_the_count(tmp_path):
+    extra = 7
+    _fan_out(tmp_path, drift_scan.MAX_FINDINGS + extra)
+    findings = drift_scan.scan(tmp_path, ["a.py"])
+    assert len(findings) == drift_scan.MAX_FINDINGS
+    assert f"and {extra} more" in findings[-1].message
+
+
+def test_resolve_js_follows_tsconfig_path_alias(tmp_path):
+    (tmp_path / "tsconfig.json").write_text(
+        '{"compilerOptions": {"paths": {"@/*": ["./*"]}}}'
+    )
+    _write(tmp_path, "lib/api.ts", "export const x = 1;\n")
+    _write(tmp_path, "components/widget.tsx", "import { x } from '@/lib/api';\n")
+    dependents = drift_scan._dependents(tmp_path, drift_scan._source_files(tmp_path))
+    assert dependents["lib/api.ts"] == {"components/widget.tsx"}
+
+
+def test_resolve_js_alias_degrades_gracefully_on_malformed_tsconfig(tmp_path):
+    (tmp_path / "tsconfig.json").write_text("{ // not valid json\n")
+    _write(tmp_path, "lib/api.ts", "export const x = 1;\n")
+    _write(tmp_path, "components/widget.tsx", "import { x } from '@/lib/api';\n")
+    dependents = drift_scan._dependents(tmp_path, drift_scan._source_files(tmp_path))
+    assert dependents.get("lib/api.ts", set()) == set()

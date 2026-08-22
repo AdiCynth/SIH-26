@@ -41,8 +41,9 @@ def _dump(config) -> None:
         print(f"\n=== {entry['repo']} ===")
         for f in sorted(_scan(repo), key=lambda f: (f.file, f.line)):
             if f.category in SCORED_CATEGORIES:
-                print(f'  {{"file": "{f.file}", "line": {f.line}, '
-                      f'"tool": "{f.tool}", "note": "{f.message[:60]}"}},')
+                stub = {"file": f.file, "line": f.line, "tool": f.tool,
+                        "note": f.message[:60]}
+                print(f"  {json.dumps(stub)},")
 
 
 def main() -> int:
@@ -96,9 +97,11 @@ def main() -> int:
     print(f"\n{'repo':<40} {'TP':>4} {'FP':>4} {'FN':>4} {'prec':>7}")
     print("-" * 62)
     for name, outcome in rows:
+        reported_here = outcome.true_positives + outcome.false_positives
+        precision_str = "n/a" if reported_here == 0 else f"{outcome.precision:.1%}"
         print(f"{name:<40} {outcome.true_positives:>4} "
               f"{outcome.false_positives:>4} {outcome.false_negatives:>4} "
-              f"{outcome.precision:>7.1%}")
+              f"{precision_str:>7}")
     print("-" * 62)
     print(f"{'TOTAL':<40} {totals['tp']:>4} {totals['fp']:>4} "
           f"{totals['fn']:>4} {1 - fp_rate:>7.1%}")

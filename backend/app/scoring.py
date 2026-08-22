@@ -24,10 +24,14 @@ def vibe_debt_score(findings: list[RawFinding]) -> int:
 
 
 def meets_threshold(findings: list[RawFinding], fail_on: str) -> bool:
-    """False when any finding is at or above the fail_on severity."""
+    """False when any security/license finding is at or above the fail_on severity.
+
+    Drift and vibe-debt findings are threshold/impact signals, not defect
+    claims (see security_score), so they must not be able to fail a CI gate.
+    """
     cutoff = SEVERITY_ORDER.index(fail_on)
     return not any(
         SEVERITY_ORDER.index(f.severity) >= cutoff
         for f in findings
-        if f.severity in SEVERITY_ORDER
+        if f.category in _SECURITY_CATEGORIES and f.severity in SEVERITY_ORDER
     )

@@ -1,4 +1,6 @@
 import ast
+import functools
+import json
 import os
 import re
 from collections import defaultdict, deque
@@ -12,6 +14,13 @@ PY_EXT = {".py"}
 JS_EXT = {".js", ".jsx", ".mjs", ".ts", ".tsx"}
 MAX_DEPTH = 3
 _SEVERITY_BY_DEPTH = {1: "medium", 2: "low"}
+# ponytail: hard cap on drift findings per scan. A widely-imported module's
+# fan-out can otherwise reach into the hundreds, and pipeline.annotate batches
+# 25 at a time and drops AI explanations from the WHOLE report if any one
+# batch fails — so uncapped drift output could take real security findings'
+# explanations down with it. Raise this, or make annotate fault-tolerant per
+# batch, if 25 starts hiding real drift.
+MAX_FINDINGS = 25
 
 _JS_IMPORT = re.compile(
     r"""(?:from|require\(|import\()\s*['"]([^'"]+)['"]"""
@@ -34,6 +43,10 @@ def _python_imports(source: str, rel: PurePosixPath) -> list[str]:
     try:
         tree = ast.parse(source)
     except (SyntaxError, ValueError):
+        # ponytail: a file the parser can't handle contributes no import edges,
+        # so its dependents go unreported. Under-reporting is the safe
+        # direction for a "check this too" signal; revisit if unparsable
+        # source turns out to be common enough to matter.
         return []
     package = rel.parent.parts
     names: list[str] = []
@@ -60,10 +73,75 @@ def _js_imports(source: str) -> list[str]:
     return [a or b for a, b in _JS_IMPORT.findall(source)]
 
 
-def _resolve_js(spec: str, rel: PurePosixPath, files: set[str]) -> list[str]:
-    if not spec.startswith("."):
-        return []  # bare specifier: an npm package, not a file in this repo
-    target = os.path.normpath((rel.parent / spec).as_posix()).replace(os.sep, "/")
+_ALIAS_CONFIG_NAMES = ("tsconfig.json", "jsconfig.json")
+
+
+@functools.lru_cache(maxsize=None)
+def _load_paths_config(
+    workspace: Path, rel_dir: PurePosixPath
+) -> tuple[str, tuple[tuple[str, tuple[str, ...]], ...]] | None:
+    """Nearest tsconfig/jsconfig.json's compilerOptions.paths, walking up from
+    rel_dir to the workspace root. Returns (base_dir, paths) with base_dir the
+    posix dir the alias targets are relative to (baseUrl), or None if no
+    config with a `paths` map is found.
+
+    # ponytail: supports only the common `"@/*": ["./*"]` shape — a single
+    # wildcard prefix per pattern, no `extends` chasing. Reach for a real
+    # tsconfig resolver if a repo needs more than that.
+    """
+    parts = rel_dir.parts
+    for i in range(len(parts), -1, -1):
+        d = PurePosixPath(*parts[:i]) if i else PurePosixPath(".")
+        for name in _ALIAS_CONFIG_NAMES:
+            cfg_path = workspace / d / name
+            if not cfg_path.is_file():
+                continue
+            try:
+                data = json.loads(cfg_path.read_text(errors="ignore"))
+            except (json.JSONDecodeError, ValueError, OSError):
+                # tsconfig commonly has comments/trailing commas; degrade to
+                # no-alias-support rather than raising.
+                continue
+            paths = (data.get("compilerOptions") or {}).get("paths")
+            if not paths:
+                continue
+            base_url = (data.get("compilerOptions") or {}).get("baseUrl", ".")
+            base_dir = os.path.normpath((d / base_url).as_posix()).replace(os.sep, "/")
+            frozen = tuple((pattern, tuple(targets)) for pattern, targets in paths.items())
+            return (base_dir, frozen)
+    return None
+
+
+def _resolve_alias(spec: str, base_dir: str, paths: tuple[tuple[str, tuple[str, ...]], ...]) -> str | None:
+    for pattern, targets in paths:
+        if not targets:
+            continue
+        if "*" not in pattern:
+            if spec == pattern:
+                return os.path.normpath((PurePosixPath(base_dir) / targets[0]).as_posix())
+            continue
+        prefix, _, suffix_pat = pattern.partition("*")
+        if spec.startswith(prefix) and spec.endswith(suffix_pat):
+            matched = spec[len(prefix):len(spec) - len(suffix_pat) or None]
+            candidate = targets[0].replace("*", matched)
+            return os.path.normpath((PurePosixPath(base_dir) / candidate).as_posix())
+    return None
+
+
+def _resolve_js(
+    spec: str, rel: PurePosixPath, files: set[str], workspace: Path | None = None
+) -> list[str]:
+    if spec.startswith("."):
+        target = os.path.normpath((rel.parent / spec).as_posix()).replace(os.sep, "/")
+    else:
+        target = None
+        if workspace is not None:
+            config = _load_paths_config(workspace, rel.parent)
+            if config is not None:
+                target = _resolve_alias(spec, *config)
+        if target is None:
+            return []  # bare specifier: an npm package, or an unresolvable alias
+        target = target.replace(os.sep, "/")
     candidates = [target]
     candidates += [f"{target}{ext}" for ext in sorted(JS_EXT)]
     candidates += [f"{target}/index{ext}" for ext in sorted(JS_EXT)]
@@ -102,6 +180,9 @@ def _dependents(workspace: Path, files: list[str]) -> dict[str, set[str]]:
         try:
             source = path.read_text(errors="ignore")
         except OSError:
+            # ponytail: an unreadable file contributes no import edges, so its
+            # dependents go unreported. Same safe-direction under-reporting as
+            # the SyntaxError case in _python_imports above.
             continue
         posix = PurePosixPath(rel)
         targets: set[str] = set()
@@ -110,7 +191,7 @@ def _dependents(workspace: Path, files: list[str]) -> dict[str, set[str]]:
                 targets |= by_key.get(name, set())
         else:
             for spec in _js_imports(source):
-                targets.update(_resolve_js(spec, posix, file_set))
+                targets.update(_resolve_js(spec, posix, file_set, workspace))
         for target in targets - {rel}:
             dependents[target].add(rel)
     return dict(dependents)
@@ -152,8 +233,14 @@ def scan(workspace: Path, files: list[str] | None = None) -> list[RawFinding]:
     dependents = _dependents(workspace, sources)
     radius = _blast_radius(dependents, seeds, MAX_DEPTH)
 
+    # Closest, most relevant dependents first; ties broken by filename for
+    # determinism (see MAX_FINDINGS below).
+    ordered = sorted(radius.items(), key=lambda item: (item[1][0], item[0]))
+    suppressed = max(0, len(ordered) - MAX_FINDINGS)
+    kept = ordered[:MAX_FINDINGS]
+
     findings = []
-    for impacted, (depth, origin) in sorted(radius.items()):
+    for impacted, (depth, origin) in kept:
         hops = "directly" if depth == 1 else f"{depth} hops away"
         findings.append(RawFinding(
             tool=TOOL,
@@ -165,4 +252,6 @@ def scan(workspace: Path, files: list[str] | None = None) -> list[RawFinding]:
                     f"but is not in this diff. Nothing here was re-reviewed — "
                     f"check the contract it relies on still holds.",
         ))
+    if suppressed:
+        findings[-1].message += f" ...and {suppressed} more impacted file(s) suppressed."
     return findings
